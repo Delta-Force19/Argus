@@ -1,0 +1,1068 @@
+import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
+from typer.testing import CliRunner
+
+from argus.interface.cli import app
+from argus.services.acquisition_batch_runner import (
+    AcquisitionBatchItemResult,
+    AcquisitionBatchItemStatus,
+    AcquisitionBatchReport,
+)
+from argus.services.acquisition_diagnostics import AcquisitionStage
+from argus.services.acquisition_status_service import (
+    AcquisitionStatusReport,
+)
+from argus.services.entity_mention_batch_runner import (
+    EntityMentionBatchItemResult,
+    EntityMentionBatchItemStatus,
+    EntityMentionBatchReport,
+)
+from argus.services.entity_mention_audit_service import (
+    EntityMentionAuditReport,
+    FrequentMention,
+    MentionCount,
+    MentionExample,
+    MentionRunSummary,
+)
+from argus.services.entity_candidate_batch_runner import (
+    EntityCandidateBatchItemResult,
+    EntityCandidateBatchItemStatus,
+    EntityCandidateBatchReport,
+)
+from argus.services.entity_candidate_audit_service import (
+    AliasSignal,
+    CandidateCount,
+    CandidateExample,
+    CandidateRunSummary,
+    EntityCandidateAuditReport,
+    FrequentCandidate,
+)
+from argus.services.alias_proposal_batch_runner import (
+    AliasProposalBatchItemResult,
+    AliasProposalBatchItemStatus,
+    AliasProposalBatchReport,
+)
+from argus.services.alias_proposal_audit_service import (
+    AliasProposalAuditReport,
+    ProposalCount,
+    ProposalExample,
+    ProposalRunSummary,
+)
+from argus.services.alias_review_service import (
+    AliasReviewQueueItem,
+    AliasReviewQueueReport,
+    RecordedAliasDecision,
+)
+from argus.services.latest_news_service import (
+    LatestNewsItem,
+    LatestNewsReport,
+)
+from argus.knowledge import (
+    AliasDecisionStatus,
+    AliasSignalType,
+    EntityType,
+)
+from argus.services.operational_pipeline_service import (
+    OperationalPipelineReport,
+)
+
+
+runner = CliRunner()
+
+
+class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.run_telegram_news_bot")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_telegram_bot_runs_public_polling_adapter(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_telegram_news_bot,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "telegram-bot",
+                "--limit",
+                "7",
+                "--excerpt-chars",
+                "400",
+                "--timezone",
+                "Europe/Amsterdam",
+                "--poll-timeout",
+                "20",
+                "--once",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        run_telegram_news_bot.assert_called_once_with(
+            news_limit=7,
+            excerpt_chars=400,
+            output_timezone=ZoneInfo("Europe/Amsterdam"),
+            poll_timeout_seconds=20,
+            run_once=True,
+            automatic_delivery=False,
+            automatic_interval_seconds=3600,
+            automatic_delivery_limit=20,
+            automatic_parse_limit=20,
+            latest_cooldown_seconds=10,
+            delivery_state_path=Path(
+                "data/telegram_delivery_state.json"
+            ),
+        )
+
+    @patch("argus.interface.cli.run_telegram_news_bot")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_telegram_bot_configures_automatic_delivery(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_telegram_news_bot,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "telegram-bot",
+                "--auto-delivery",
+                "--delivery-interval-minutes",
+                "15",
+                "--delivery-limit",
+                "12",
+                "--auto-parse-limit",
+                "14",
+                "--delivery-state-path",
+                "data/test-delivery.json",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        run_telegram_news_bot.assert_called_once_with(
+            news_limit=10,
+            excerpt_chars=500,
+            output_timezone=ZoneInfo("UTC"),
+            poll_timeout_seconds=30,
+            run_once=False,
+            automatic_delivery=True,
+            automatic_interval_seconds=900,
+            automatic_delivery_limit=12,
+            automatic_parse_limit=14,
+            latest_cooldown_seconds=10,
+            delivery_state_path=Path("data/test-delivery.json"),
+        )
+
+    @patch("argus.interface.cli.run_telegram_news_bot")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_telegram_bot_reports_missing_environment(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_telegram_news_bot,
+    ) -> None:
+        run_telegram_news_bot.side_effect = ValueError(
+            "ARGUS_TELEGRAM_BOT_TOKEN is required."
+        )
+
+        result = runner.invoke(app, ["telegram-bot", "--once"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn(
+            "ARGUS_TELEGRAM_BOT_TOKEN is required",
+            result.output,
+        )
+
+    @patch("argus.interface.cli.get_latest_news")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_latest_news_prints_reader_feed_in_requested_timezone(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_latest_news,
+    ) -> None:
+        published_at = datetime(2026, 7, 28, 18, 30)
+        fetched_at = datetime(2026, 7, 28, 18, 35)
+        get_latest_news.return_value = LatestNewsReport(
+            items=(
+                LatestNewsItem(
+                    article_id=7,
+                    published_at=published_at,
+                    fetched_at=fetched_at,
+                    source="Example News",
+                    title="First\nheadline",
+                    url="https://example.test/story",
+                    language="en",
+                    parsing_status="done",
+                    excerpt_source="content",
+                    excerpt="First\nparagraph.",
+                ),
+                LatestNewsItem(
+                    article_id=8,
+                    published_at=None,
+                    fetched_at=fetched_at,
+                    source="unknown",
+                    title="Second headline",
+                    url="https://example.test/other",
+                    language=None,
+                    parsing_status="not_started",
+                    excerpt_source=None,
+                    excerpt=None,
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "latest-news",
+                "--limit",
+                "2",
+                "--excerpt-chars",
+                "120",
+                "--timezone",
+                "Europe/Amsterdam",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_latest_news.assert_called_once_with(
+            limit=2,
+            excerpt_chars=120,
+        )
+        self.assertIn(
+            "shown=2 content=1 summary=0 headline_only=1 "
+            "timezone=Europe/Amsterdam",
+            result.stdout,
+        )
+        self.assertIn(
+            "1. [2026-07-28 20:30 CEST] Example News",
+            result.stdout,
+        )
+        self.assertIn("First\nheadline", result.stdout)
+        self.assertIn("First\nparagraph.", result.stdout)
+        self.assertNotIn("article_id=7", result.stdout)
+        self.assertIn(
+            "2. [time unknown] unknown",
+            result.stdout,
+        )
+        self.assertNotIn("excerpt=unavailable", result.stdout)
+
+    @patch("argus.interface.cli.get_latest_news")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_latest_news_details_preserve_diagnostics(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_latest_news,
+    ) -> None:
+        get_latest_news.return_value = LatestNewsReport(
+            items=(
+                LatestNewsItem(
+                    article_id=7,
+                    published_at=datetime(2026, 7, 28, 18, 30),
+                    fetched_at=datetime(2026, 7, 28, 18, 35),
+                    source="Example News",
+                    title="Headline",
+                    url="https://example.test/story",
+                    language="en",
+                    parsing_status="done",
+                    excerpt_source="content",
+                    excerpt="Paragraph.",
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            ["latest-news", "--details"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("article_id=7", result.stdout)
+        self.assertIn("language=en", result.stdout)
+        self.assertIn("parsing=done", result.stdout)
+        self.assertIn("excerpt_source=content", result.stdout)
+
+    @patch("argus.interface.cli.get_latest_news")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_latest_news_rejects_unknown_timezone(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_latest_news,
+    ) -> None:
+        get_latest_news.return_value = LatestNewsReport(items=())
+
+        result = runner.invoke(
+            app,
+            ["latest-news", "--timezone", "Mars/Olympus"],
+        )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Unknown IANA timezone", result.output)
+
+    @patch("argus.interface.cli.parse_articles")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_parse_can_prioritize_newest_articles(
+            self,
+            upgrade_database,
+            configure_logging,
+            parse_articles,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            ["parse", "--limit", "12", "--newest"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        parse_articles.assert_called_once_with(
+            limit=12,
+            retry_failed=False,
+            newest_first=True,
+        )
+
+    @patch("argus.interface.cli.collect_articles")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_database_is_upgraded_before_command(
+            self,
+            upgrade_database,
+            configure_logging,
+            collect_articles,
+    ):
+        calls: list[str] = []
+
+        upgrade_database.side_effect = (
+            lambda: calls.append("upgrade")
+        )
+        configure_logging.side_effect = (
+            lambda: calls.append("logging")
+        )
+        collect_articles.side_effect = (
+            lambda: calls.append("collect")
+        )
+
+        result = runner.invoke(app, ["collect"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            calls,
+            ["upgrade", "logging", "collect"],
+        )
+
+    @patch("argus.interface.cli.acquire_articles")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_acquire_runs_new_pipeline_and_prints_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            acquire_articles,
+    ):
+        acquire_articles.return_value = AcquisitionBatchReport(items=())
+
+        result = runner.invoke(
+            app,
+            [
+                "acquire",
+                "--limit",
+                "7",
+                "--retry-unsuccessful",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        acquire_articles.assert_called_once_with(
+            limit=7,
+            retry_unsuccessful=True,
+        )
+        self.assertIn(
+            "total=0 processed=0 retrieval_only=0 failed=0",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.acquire_articles")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_acquire_prints_per_candidate_failure_diagnostics(
+            self,
+            upgrade_database,
+            configure_logging,
+            acquire_articles,
+    ) -> None:
+        acquire_articles.return_value = AcquisitionBatchReport(
+            items=(
+                AcquisitionBatchItemResult(
+                    candidate_id=17,
+                    url="https://example.com/broken",
+                    status=AcquisitionBatchItemStatus.FAILED,
+                    failure_stage=AcquisitionStage.PROCESSING,
+                    error_type="ValueError",
+                    error_message="No main text\ncould be extracted.",
+                ),
+            )
+        )
+
+        result = runner.invoke(app, ["acquire"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(
+            "candidate_id=17 status=failed stage=processing "
+            "url=https://example.com/broken error_type=ValueError "
+            "error=No main text could be extracted.",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_acquisition_status")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_acquisition_status_prints_queue_and_paused_sources(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_acquisition_status,
+    ) -> None:
+        get_acquisition_status.return_value = AcquisitionStatusReport(
+            total=15,
+            unattempted=5,
+            succeeded=4,
+            retryable=3,
+            access_restricted=2,
+            exhausted=1,
+            paused_sources=("The Telegraph",),
+        )
+
+        result = runner.invoke(app, ["acquisition-status"])
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_acquisition_status.assert_called_once_with()
+        self.assertIn(
+            "total=15 unattempted=5 succeeded=4 retryable=3 "
+            "access_restricted=2 exhausted=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "paused_source=The Telegraph",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.run_entity_mention_pipeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_extract_mentions_runs_bounded_pipeline_and_prints_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_entity_mention_pipeline,
+    ) -> None:
+        run_entity_mention_pipeline.return_value = (
+            EntityMentionBatchReport(
+                items=(
+                    EntityMentionBatchItemResult(
+                        text_artifact_id=7,
+                        status=EntityMentionBatchItemStatus.PROCESSED,
+                        entity_artifact_id=11,
+                        mention_count=4,
+                    ),
+                    EntityMentionBatchItemResult(
+                        text_artifact_id=8,
+                        status=EntityMentionBatchItemStatus.FAILED,
+                        error_type="ValueError",
+                        error_message="Unsupported\ninput.",
+                    ),
+                )
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            ["extract-mentions", "--limit", "7"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        run_entity_mention_pipeline.assert_called_once_with(limit=7)
+        self.assertIn(
+            "total=2 processed=1 failed=1 mentions=4",
+            result.stdout,
+        )
+        self.assertIn(
+            "text_artifact_id=8 status=failed "
+            "error_type=ValueError error=Unsupported input.",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.run_entity_candidate_pipeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_generate_candidates_runs_bounded_pipeline_and_prints_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_entity_candidate_pipeline,
+    ) -> None:
+        run_entity_candidate_pipeline.return_value = (
+            EntityCandidateBatchReport(
+                items=(
+                    EntityCandidateBatchItemResult(
+                        mention_artifact_id=11,
+                        status=EntityCandidateBatchItemStatus.PROCESSED,
+                        candidate_artifact_id=21,
+                        candidate_count=4,
+                        excluded_count=3,
+                    ),
+                    EntityCandidateBatchItemResult(
+                        mention_artifact_id=12,
+                        status=EntityCandidateBatchItemStatus.FAILED,
+                        error_type="ValueError",
+                        error_message="Invalid\nmention offsets.",
+                    ),
+                )
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            ["generate-candidates", "--limit", "7"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        run_entity_candidate_pipeline.assert_called_once_with(limit=7)
+        self.assertIn(
+            "total=2 processed=1 failed=1 candidates=4 excluded=3",
+            result.stdout,
+        )
+        self.assertIn(
+            "mention_artifact_id=12 status=failed "
+            "error_type=ValueError error=Invalid mention offsets.",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.run_alias_proposal_pipeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_propose_aliases_runs_bounded_pipeline_and_prints_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_alias_proposal_pipeline,
+    ) -> None:
+        run_alias_proposal_pipeline.return_value = (
+            AliasProposalBatchReport(
+                items=(
+                    AliasProposalBatchItemResult(
+                        candidate_artifact_id=21,
+                        status=AliasProposalBatchItemStatus.PROCESSED,
+                        proposal_artifact_id=31,
+                        proposal_count=4,
+                    ),
+                    AliasProposalBatchItemResult(
+                        candidate_artifact_id=22,
+                        status=AliasProposalBatchItemStatus.FAILED,
+                        error_type="ValueError",
+                        error_message="Invalid\ncandidate provenance.",
+                    ),
+                )
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            ["propose-aliases", "--limit", "7"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        run_alias_proposal_pipeline.assert_called_once_with(limit=7)
+        self.assertIn(
+            "total=2 processed=1 failed=1 proposals=4",
+            result.stdout,
+        )
+        self.assertIn(
+            "candidate_artifact_id=22 status=failed "
+            "error_type=ValueError error=Invalid candidate provenance.",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_entity_candidate_audit")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_candidate_audit_prints_read_only_quality_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_entity_candidate_audit,
+    ) -> None:
+        get_entity_candidate_audit.return_value = (
+            EntityCandidateAuditReport(
+                candidate_count=4,
+                artifact_count=2,
+                document_version_count=2,
+                counts_by_language=(CandidateCount("en", 4),),
+                counts_by_type=(CandidateCount("person", 4),),
+                frequent_candidates=(
+                    FrequentCandidate(
+                        entity_type=EntityType.PERSON,
+                        canonical_text="alice smith",
+                        candidate_count=4,
+                        document_count=2,
+                        surface_variants=("Alice Smith", "ALICE SMITH"),
+                    ),
+                ),
+                densest_runs=(
+                    CandidateRunSummary(
+                        artifact_id=21,
+                        input_artifact_id=11,
+                        document_version_id=3,
+                        language="en",
+                        candidate_count=3,
+                        unique_form_count=2,
+                        method_version="1",
+                        title="First\nstory",
+                    ),
+                ),
+                alias_signals=(
+                    AliasSignal(
+                        entity_type=EntityType.PERSON,
+                        left_text="alice smith",
+                        right_text="smith",
+                        reason="person_short_name",
+                        left_count=2,
+                        right_count=2,
+                        shared_document_count=1,
+                        left_context="Alice\nSmith spoke.",
+                        right_context="Smith\nanswered.",
+                    ),
+                ),
+                examples=(
+                    CandidateExample(
+                        candidate_id=31,
+                        artifact_id=21,
+                        mention_id=11,
+                        document_version_id=3,
+                        language="en",
+                        entity_type=EntityType.PERSON,
+                        surface_text="Alice\nSmith",
+                        canonical_text="alice smith",
+                        context_text="Alice\nSmith spoke.",
+                        context_start_char=0,
+                        context_end_char=18,
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "candidate-audit",
+                "--top",
+                "5",
+                "--examples",
+                "7",
+                "--pairs",
+                "9",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_entity_candidate_audit.assert_called_once_with(
+            top=5,
+            examples=7,
+            pairs=9,
+        )
+        self.assertIn(
+            "candidates=4 artifacts=2 document_versions=2",
+            result.stdout,
+        )
+        self.assertIn("language=en candidates=4", result.stdout)
+        self.assertIn(
+            "frequent type=person canonical='alice smith' candidates=4 "
+            "document_versions=2 surfaces='Alice Smith | ALICE SMITH'",
+            result.stdout,
+        )
+        self.assertIn(
+            "alias-signal type=person left='alice smith' right='smith' "
+            "reason=person_short_name",
+            result.stdout,
+        )
+        self.assertIn("title='First story'", result.stdout)
+        self.assertIn(
+            "surface='Alice Smith' canonical='alice smith' "
+            "context='Alice Smith spoke.'",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_alias_proposal_audit")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_alias_proposal_audit_prints_evidence_and_limitations(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_alias_proposal_audit,
+    ) -> None:
+        get_alias_proposal_audit.return_value = AliasProposalAuditReport(
+            proposal_count=1,
+            artifact_count=1,
+            document_version_count=1,
+            counts_by_signal=(ProposalCount("acronym", 1),),
+            counts_by_type=(ProposalCount("organization", 1),),
+            counts_by_confidence_band=(ProposalCount("high", 1),),
+            runs=(
+                ProposalRunSummary(
+                    artifact_id=31,
+                    input_artifact_id=21,
+                    document_version_id=3,
+                    language="en",
+                    proposal_count=1,
+                    proposer_version="1",
+                    title="First\nstory",
+                ),
+            ),
+            examples=(
+                ProposalExample(
+                    proposal_id=41,
+                    artifact_id=31,
+                    document_version_id=3,
+                    language="en",
+                    entity_type=EntityType.ORGANIZATION,
+                    left_text="un",
+                    right_text="united nations",
+                    signal_type=AliasSignalType.ACRONYM,
+                    confidence_score=0.80,
+                    confidence_band="high",
+                    confidence_basis="deterministic-heuristic-v1",
+                    rationale="Initialism in the same document.",
+                    left_occurrence_count=1,
+                    right_occurrence_count=1,
+                    shared_document_count=1,
+                    left_context="UN\nspoke.",
+                    right_context="United Nations\nanswered.",
+                    title="First\nstory",
+                ),
+            ),
+            quality_limitations=(
+                "A proposal is not an approved alias.",
+            ),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "alias-proposal-audit",
+                "--top",
+                "5",
+                "--examples",
+                "29",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_alias_proposal_audit.assert_called_once_with(
+            top=5,
+            examples=29,
+        )
+        self.assertIn(
+            "proposals=1 artifacts=1 document_versions=1",
+            result.stdout,
+        )
+        self.assertIn("signal=acronym proposals=1", result.stdout)
+        self.assertIn(
+            "confidence_band=high proposals=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "left='un' right='united nations' signal=acronym "
+            "confidence=0.80 band=high",
+            result.stdout,
+        )
+        self.assertIn("left_context='UN spoke.'", result.stdout)
+        self.assertIn("title='First story'", result.stdout)
+        self.assertIn(
+            "limitation='A proposal is not an approved alias.'",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_alias_review_queue")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_alias_review_queue_prints_open_evidence(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_alias_review_queue,
+    ) -> None:
+        get_alias_review_queue.return_value = AliasReviewQueueReport(
+            open_count=7,
+            items=(
+                AliasReviewQueueItem(
+                    proposal_id=41,
+                    document_version_id=3,
+                    entity_type=EntityType.ORGANIZATION,
+                    left_text="us",
+                    right_text="united states",
+                    signal_type=AliasSignalType.ACRONYM,
+                    confidence_score=0.80,
+                    confidence_basis="deterministic-heuristic-v1",
+                    rationale="Initialism in the same document.",
+                    left_occurrence_count=1,
+                    right_occurrence_count=2,
+                    shared_document_count=1,
+                    left_context="US\nspoke.",
+                    right_context="The United States\nanswered.",
+                    latest_decision_id=51,
+                    latest_revision=1,
+                    latest_status=AliasDecisionStatus.NEEDS_REVIEW,
+                    latest_reason="Case must be checked.",
+                    latest_reviewer="analyst-one",
+                ),
+            ),
+        )
+
+        result = runner.invoke(
+            app,
+            ["alias-review-queue", "--limit", "5"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_alias_review_queue.assert_called_once_with(limit=5)
+        self.assertIn("open=7 shown=1", result.stdout)
+        self.assertIn(
+            "proposal_id=41 document_version_id=3 "
+            "type=organization left='us' right='united states'",
+            result.stdout,
+        )
+        self.assertIn(
+            "latest_status=needs_review latest_revision=1",
+            result.stdout,
+        )
+        self.assertIn("left_context='US spoke.'", result.stdout)
+
+    @patch("argus.interface.cli.record_alias_decision")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_decide_alias_records_one_explicit_manual_decision(
+            self,
+            upgrade_database,
+            configure_logging,
+            record_alias_decision,
+    ) -> None:
+        record_alias_decision.return_value = RecordedAliasDecision(
+            decision_id=52,
+            proposal_id=41,
+            revision=2,
+            supersedes_decision_id=51,
+            status=AliasDecisionStatus.APPROVED,
+            reason="Same organization in the cited context.",
+            reviewer="analyst-two",
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "decide-alias",
+                "--proposal-id",
+                "41",
+                "--status",
+                "approved",
+                "--reason",
+                "Same organization in the cited context.",
+                "--reviewer",
+                "analyst-two",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        record_alias_decision.assert_called_once_with(
+            proposal_id=41,
+            status=AliasDecisionStatus.APPROVED,
+            reason="Same organization in the cited context.",
+            reviewer="analyst-two",
+        )
+        self.assertIn(
+            "decision_id=52 proposal_id=41 revision=2 "
+            "supersedes=51 status=approved",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.record_alias_decision")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_decide_alias_rejects_unknown_status_before_write(
+            self,
+            upgrade_database,
+            configure_logging,
+            record_alias_decision,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "decide-alias",
+                "--proposal-id",
+                "41",
+                "--status",
+                "automatic",
+                "--reason",
+                "Invalid.",
+                "--reviewer",
+                "analyst",
+            ],
+        )
+
+        self.assertNotEqual(result.exit_code, 0)
+        record_alias_decision.assert_not_called()
+
+    @patch("argus.interface.cli.get_entity_mention_audit")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_mention_audit_prints_read_only_quality_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_entity_mention_audit,
+    ) -> None:
+        get_entity_mention_audit.return_value = EntityMentionAuditReport(
+            mention_count=4,
+            artifact_count=2,
+            document_version_count=2,
+            counts_by_language=(MentionCount("en", 4),),
+            counts_by_type=(MentionCount("person", 4),),
+            frequent_mentions=(
+                FrequentMention(
+                    entity_type=EntityType.PERSON,
+                    normalized_text="alice",
+                    mention_count=4,
+                    document_count=2,
+                    surface_variants=("Alice", "ALICE"),
+                ),
+            ),
+            densest_runs=(
+                MentionRunSummary(
+                    artifact_id=8,
+                    document_version_id=3,
+                    language="en",
+                    mention_count=3,
+                    unique_form_count=2,
+                    method_version="en_core_web_sm@3.8.0",
+                    title="First\nstory",
+                ),
+            ),
+            examples=(
+                MentionExample(
+                    mention_id=11,
+                    artifact_id=8,
+                    document_version_id=3,
+                    language="en",
+                    entity_type=EntityType.PERSON,
+                    source_label="PERSON",
+                    surface_text="Alice\nSmith",
+                    normalized_text="alice smith",
+                    start_char=0,
+                    end_char=11,
+                ),
+            ),
+        )
+
+        result = runner.invoke(
+            app,
+            ["mention-audit", "--top", "5", "--examples", "7"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_entity_mention_audit.assert_called_once_with(
+            top=5,
+            examples=7,
+        )
+        self.assertIn(
+            "mentions=4 artifacts=2 document_versions=2",
+            result.stdout,
+        )
+        self.assertIn("language=en mentions=4", result.stdout)
+        self.assertIn(
+            "frequent type=person normalized='alice' mentions=4 "
+            "document_versions=2 surfaces='Alice | ALICE'",
+            result.stdout,
+        )
+        self.assertIn("title='First story'", result.stdout)
+        self.assertIn(
+            "span=0:11 surface='Alice Smith' "
+            "normalized='alice smith'",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.run_operational_pipeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_run_uses_provenance_pipeline_and_prints_report(
+            self,
+            upgrade_database,
+            configure_logging,
+            run_operational_pipeline,
+    ) -> None:
+        run_operational_pipeline.return_value = (
+            OperationalPipelineReport(
+                acquisition=AcquisitionBatchReport(items=()),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--acquisition-limit",
+                "7",
+                "--analysis-limit",
+                "11",
+                "--retry-unsuccessful",
+                "--retry-failed",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        run_operational_pipeline.assert_called_once_with(
+            acquisition_limit=7,
+            analysis_limit=11,
+            retry_unsuccessful=True,
+            retry_failed_analysis=True,
+        )
+        self.assertIn(
+            "total=0 processed=0 retrieval_only=0 failed=0",
+            result.stdout,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

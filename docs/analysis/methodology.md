@@ -1,0 +1,1 @@
+Argus never asks users to trust its conclusions. It provides evidence that allows users to evaluate those conclusions independently.

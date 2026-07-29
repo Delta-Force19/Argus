@@ -1,0 +1,20 @@
+# IntelliJ
+.idea/
+*.iml
+
+# Python
+.venv/
+**/__pycache__/
+*.py[cod]
+
+# Database
+data/database/
+data/raw_artifacts/
+data/telegram_delivery_state.json
+*.db
+
+# Logs
+logs/
+
+# Environment
+.env
