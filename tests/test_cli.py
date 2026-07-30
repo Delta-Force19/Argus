@@ -66,6 +66,12 @@ from argus.services.entity_registry_audit_service import (
     EntityResolutionValidity,
     ResolutionValidityCount,
 )
+from argus.services.safe_entity_projection_service import (
+    ActiveEntityResolution,
+    SafeEntity,
+    SafeEntityCandidate,
+    SafeEntityProjection,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -1066,6 +1072,86 @@ class CLITests(unittest.TestCase):
             "applied_decision_ids=52 latest_decision_id=53 "
             "latest_revision=3 latest_status=rejected "
             "validity=revoked",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_safe_entity_projection")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_safe_entities_prints_only_projected_identity(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_safe_entity_projection,
+    ) -> None:
+        get_safe_entity_projection.return_value = SafeEntityProjection(
+            safe_entity_count=1,
+            items=(
+                SafeEntity(
+                    entity_id=61,
+                    entity_type=EntityType.ORGANIZATION,
+                    canonical_name="united nations",
+                    canonical_entity_candidate_id=12,
+                    created_from_alias_decision_id=52,
+                    candidates=(
+                        SafeEntityCandidate(
+                            assignment_id=71,
+                            entity_candidate_id=11,
+                            entity_type=EntityType.ORGANIZATION,
+                            canonical_text="un",
+                            document_version_id=21,
+                            derived_artifact_id=31,
+                            entity_mention_id=41,
+                            assigned_by_alias_decision_id=52,
+                        ),
+                        SafeEntityCandidate(
+                            assignment_id=72,
+                            entity_candidate_id=12,
+                            entity_type=EntityType.ORGANIZATION,
+                            canonical_text="united nations",
+                            document_version_id=21,
+                            derived_artifact_id=31,
+                            entity_mention_id=42,
+                            assigned_by_alias_decision_id=52,
+                        ),
+                    ),
+                    active_resolutions=(
+                        ActiveEntityResolution(
+                            proposal_id=41,
+                            left_candidate_id=11,
+                            right_candidate_id=12,
+                            latest_alias_decision_id=52,
+                            latest_revision=1,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "safe-entities",
+                "--limit",
+                "25",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_safe_entity_projection.assert_called_once_with(
+            limit=25,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn("safe_entities=1 shown=1", result.stdout)
+        self.assertIn(
+            "entity_id=61 type=organization "
+            "canonical_name='united nations' "
+            "canonical_candidate_id=12 "
+            "candidate_ids=11,12 active_decision_ids=52",
             result.stdout,
         )
 

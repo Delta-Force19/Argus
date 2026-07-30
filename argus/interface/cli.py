@@ -55,9 +55,12 @@ from argus.services.entity_resolution_service import (
 from argus.services.entity_registry_audit_service import (
     get_entity_registry_audit,
 )
+from argus.services.safe_entity_projection_service import (
+    get_safe_entity_projection,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
-from argus.knowledge import AliasDecisionStatus
+from argus.knowledge import AliasDecisionStatus, EntityType
 from argus.services.operational_pipeline_service import (
     run_operational_pipeline,
 )
@@ -757,6 +760,49 @@ def entity_registry_audit(
             f"latest_revision={item.latest_revision} "
             f"latest_status={item.latest_status.value} "
             f"validity={item.validity.value}"
+        )
+
+
+@app.command()
+def safe_entities(
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of safe entities to show.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type filter.",
+        ),
+) -> None:
+    """Expose only fully active entities for downstream consumers."""
+
+    projection = get_safe_entity_projection(
+        limit=limit,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"safe_entities={projection.safe_entity_count} "
+        f"shown={len(projection.items)}"
+    )
+    for entity in projection.items:
+        candidate_ids = ",".join(
+            str(candidate.entity_candidate_id)
+            for candidate in entity.candidates
+        )
+        decision_ids = ",".join(
+            str(link.latest_alias_decision_id)
+            for link in entity.active_resolutions
+        )
+        typer.echo(
+            f"entity entity_id={entity.entity_id} "
+            f"type={entity.entity_type.value} "
+            f"canonical_name={entity.canonical_name!r} "
+            f"canonical_candidate_id="
+            f"{entity.canonical_entity_candidate_id} "
+            f"candidate_ids={candidate_ids} "
+            f"active_decision_ids={decision_ids}"
         )
 
 

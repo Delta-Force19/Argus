@@ -1,6 +1,6 @@
 import unittest
 
-from sqlalchemy import create_engine, delete, func, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from argus.database import Base
@@ -14,20 +14,18 @@ from argus.models import (
     AliasDecision,
     AliasProposal,
     EntityCandidate,
-    EntityCandidateAssignment,
     EntityResolutionEvidence,
 )
 from argus.services.alias_decision_service import AliasDecisionService
-from argus.services.entity_registry_audit_service import (
-    EntityResolutionValidity,
-    get_entity_registry_audit,
-)
 from argus.services.entity_resolution_service import (
     EntityResolutionService,
 )
+from argus.services.safe_entity_projection_service import (
+    get_safe_entity_projection,
+)
 
 
-class EntityRegistryAuditServiceTests(unittest.TestCase):
+class SafeEntityProjectionServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
@@ -52,106 +50,59 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
         self.session.close()
         self.engine.dispose()
 
-    def test_current_consumed_approval_is_active_and_safe(self) -> None:
-        report = get_entity_registry_audit(
+    def test_projects_complete_active_identity_with_provenance(
+            self,
+    ) -> None:
+        projection = get_safe_entity_projection(
             session_factory=self.session_factory,
         )
 
-        self.assertEqual(report.entity_count, 1)
-        self.assertEqual(report.safe_entity_count, 1)
-        self.assertEqual(report.blocked_entity_count, 0)
-        self.assertEqual(report.link_count, 1)
+        self.assertEqual(projection.safe_entity_count, 1)
+        self.assertEqual(len(projection.items), 1)
+        item = projection.items[0]
+        self.assertEqual(item.entity_id, self.entity.entity_id)
+        self.assertEqual(item.entity_type, EntityType.ORGANIZATION)
+        self.assertEqual(item.canonical_name, "united nations")
         self.assertEqual(
-            report.counts_by_validity[0].validity,
-            EntityResolutionValidity.ACTIVE,
-        )
-        item = report.items[0]
-        self.assertTrue(item.safe_for_downstream_use)
-        self.assertEqual(item.applied_decision_ids, (self.approval.id,))
-        self.assertEqual(item.latest_decision_id, self.approval.id)
-        self.assertEqual(
-            item.validity,
-            EntityResolutionValidity.ACTIVE,
-        )
-
-    def test_new_approval_requires_explicit_reapplication(self) -> None:
-        second = self._decide(
-            self.proposal,
-            AliasDecisionStatus.APPROVED,
-        )
-        self.session.commit()
-
-        pending = get_entity_registry_audit(
-            session_factory=self.session_factory,
-        )
-
-        self.assertEqual(pending.safe_entity_count, 0)
-        self.assertEqual(
-            pending.items[0].validity,
-            EntityResolutionValidity.PENDING_REAPPLICATION,
-        )
-        self.assertEqual(pending.items[0].latest_decision_id, second.id)
-
-        EntityResolutionService(
-            self.session
-        ).resolve_approved_alias(
-            proposal_id=self.proposal.id,
-        )
-        self.session.commit()
-        active = get_entity_registry_audit(
-            session_factory=self.session_factory,
-        )
-
-        self.assertEqual(active.safe_entity_count, 1)
-        self.assertEqual(
-            active.items[0].applied_decision_ids,
-            (self.approval.id, second.id),
+            item.canonical_entity_candidate_id,
+            self.right.id,
         )
         self.assertEqual(
-            active.items[0].validity,
-            EntityResolutionValidity.ACTIVE,
+            tuple(
+                candidate.entity_candidate_id
+                for candidate in item.candidates
+            ),
+            (self.left.id, self.right.id),
         )
-
-    def test_rejection_revokes_applied_registry_link(self) -> None:
-        rejection = self._decide(
-            self.proposal,
-            AliasDecisionStatus.REJECTED,
-        )
-        self.session.commit()
-
-        report = get_entity_registry_audit(
-            session_factory=self.session_factory,
-        )
-
-        item = report.items[0]
-        self.assertFalse(item.safe_for_downstream_use)
-        self.assertEqual(item.latest_decision_id, rejection.id)
-        self.assertEqual(item.latest_status, AliasDecisionStatus.REJECTED)
         self.assertEqual(
-            item.validity,
-            EntityResolutionValidity.REVOKED,
+            item.candidates[0].assigned_by_alias_decision_id,
+            self.approval.id,
         )
+        link = item.active_resolutions[0]
+        self.assertEqual(link.proposal_id, self.proposal.id)
+        self.assertEqual(
+            link.latest_alias_decision_id,
+            self.approval.id,
+        )
+        self.assertEqual(link.latest_revision, 1)
 
-    def test_needs_review_suspends_applied_registry_link(self) -> None:
-        review = self._decide(
+    def test_new_review_immediately_removes_entity_from_projection(
+            self,
+    ) -> None:
+        self._decide(
             self.proposal,
             AliasDecisionStatus.NEEDS_REVIEW,
         )
         self.session.commit()
 
-        report = get_entity_registry_audit(
+        projection = get_safe_entity_projection(
             session_factory=self.session_factory,
         )
 
-        item = report.items[0]
-        self.assertEqual(item.latest_decision_id, review.id)
-        self.assertEqual(
-            item.validity,
-            EntityResolutionValidity.NEEDS_REVIEW,
-        )
-        self.assertEqual(report.blocked_entity_count, 1)
+        self.assertEqual(projection.safe_entity_count, 0)
+        self.assertEqual(projection.items, ())
 
-    def test_one_invalid_extension_blocks_whole_entity(self) -> None:
+    def test_invalid_extension_blocks_the_complete_entity(self) -> None:
         third = self._candidate("un organisation")
         extension = self._proposal(self.left, third)
         self._decide(extension, AliasDecisionStatus.APPROVED)
@@ -161,29 +112,92 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
         self._decide(extension, AliasDecisionStatus.REJECTED)
         self.session.commit()
 
-        report = get_entity_registry_audit(
+        projection = get_safe_entity_projection(
             session_factory=self.session_factory,
         )
 
-        self.assertEqual(report.link_count, 2)
-        self.assertEqual(report.safe_entity_count, 0)
-        self.assertTrue(
-            all(
-                not item.safe_for_downstream_use
-                for item in report.items
-            )
+        self.assertEqual(projection.safe_entity_count, 0)
+        self.assertEqual(projection.items, ())
+
+    def test_reapproval_requires_reapplication_before_projection(
+            self,
+    ) -> None:
+        second = self._decide(
+            self.proposal,
+            AliasDecisionStatus.APPROVED,
         )
-        self.assertEqual(
-            {item.validity for item in report.items},
-            {
-                EntityResolutionValidity.ACTIVE,
-                EntityResolutionValidity.REVOKED,
-            },
+        self.session.commit()
+
+        pending = get_safe_entity_projection(
+            session_factory=self.session_factory,
+        )
+        self.assertEqual(pending.items, ())
+
+        EntityResolutionService(
+            self.session
+        ).resolve_approved_alias(proposal_id=self.proposal.id)
+        self.session.commit()
+        active = get_safe_entity_projection(
+            session_factory=self.session_factory,
         )
 
-    def test_audit_is_read_only_and_validates_limit(self) -> None:
+        self.assertEqual(active.safe_entity_count, 1)
+        self.assertEqual(
+            active.items[0]
+            .active_resolutions[0]
+            .latest_alias_decision_id,
+            second.id,
+        )
+
+    def test_type_filter_and_limit_have_stable_semantics(self) -> None:
+        second_left = self._candidate(
+            "a. smith",
+            entity_type=EntityType.PERSON,
+        )
+        second_right = self._candidate(
+            "alice smith",
+            entity_type=EntityType.PERSON,
+        )
+        second_proposal = self._proposal(
+            second_left,
+            second_right,
+        )
+        self._decide(
+            second_proposal,
+            AliasDecisionStatus.APPROVED,
+        )
+        second_entity = EntityResolutionService(
+            self.session
+        ).resolve_approved_alias(
+            proposal_id=second_proposal.id,
+            canonical_candidate_id=second_right.id,
+        )
+        self.session.commit()
+
+        filtered = get_safe_entity_projection(
+            limit=1,
+            entity_type=EntityType.PERSON,
+            session_factory=self.session_factory,
+        )
+        unfiltered = get_safe_entity_projection(
+            limit=1,
+            session_factory=self.session_factory,
+        )
+
+        self.assertEqual(filtered.safe_entity_count, 1)
+        self.assertEqual(
+            filtered.items[0].entity_id,
+            second_entity.entity_id,
+        )
+        self.assertEqual(unfiltered.safe_entity_count, 2)
+        self.assertEqual(
+            unfiltered.items[0].entity_id,
+            self.entity.entity_id,
+        )
+
+    def test_projection_is_read_only_and_validates_limit(self) -> None:
         with self.assertRaisesRegex(ValueError, "limit"):
-            get_entity_registry_audit(
+            get_safe_entity_projection(
                 limit=0,
                 session_factory=self.session_factory,
             )
@@ -193,7 +207,7 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
                 EntityResolutionEvidence
             )
         )
-        get_entity_registry_audit(
+        projection = get_safe_entity_projection(
             session_factory=self.session_factory,
         )
         self.session.expire_all()
@@ -204,23 +218,19 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(after, before)
-
-    def test_entity_without_validity_links_is_blocked(self) -> None:
-        self.session.execute(delete(EntityResolutionEvidence))
-        self.session.execute(delete(EntityCandidateAssignment))
-        self.session.commit()
-
-        report = get_entity_registry_audit(
-            session_factory=self.session_factory,
+        self.session.close()
+        self.assertEqual(
+            projection.items[0].canonical_name,
+            "united nations",
         )
+        self.session = self.session_factory()
 
-        self.assertEqual(report.entity_count, 1)
-        self.assertEqual(report.safe_entity_count, 0)
-        self.assertEqual(report.blocked_entity_count, 1)
-        self.assertEqual(report.link_count, 0)
-        self.assertEqual(report.items, ())
-
-    def _candidate(self, text: str) -> EntityCandidate:
+    def _candidate(
+            self,
+            text: str,
+            *,
+            entity_type: EntityType = EntityType.ORGANIZATION,
+    ) -> EntityCandidate:
         next_id = (
             self.session.scalar(
                 select(func.count()).select_from(EntityCandidate)
@@ -231,7 +241,7 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
             derived_artifact_id=next_id,
             entity_mention_id=next_id,
             document_version_id=1,
-            entity_type=EntityType.ORGANIZATION,
+            entity_type=entity_type,
             canonical_text=text,
             context_text=f"{text} appeared in the source.",
             context_start_char=0,
@@ -252,7 +262,7 @@ class EntityRegistryAuditServiceTests(unittest.TestCase):
             document_version_id=1,
             left_entity_candidate_id=left.id,
             right_entity_candidate_id=right.id,
-            entity_type=EntityType.ORGANIZATION,
+            entity_type=left.entity_type,
             left_canonical_text=left.canonical_text,
             right_canonical_text=right.canonical_text,
             signal_type=AliasSignalType.ACRONYM,

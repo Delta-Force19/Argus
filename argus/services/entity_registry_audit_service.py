@@ -65,6 +65,17 @@ class EntityRegistryAuditReport:
 
 
 @dataclass(frozen=True, slots=True)
+class EntityRegistryValiditySnapshot:
+    """Complete detached validity boundary for registry consumers."""
+
+    entity_count: int
+    safe_entity_ids: tuple[int, ...]
+    blocked_entity_ids: tuple[int, ...]
+    counts_by_validity: tuple[ResolutionValidityCount, ...]
+    items: tuple[EntityRegistryAuditItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _RegistryRows:
     entities: tuple[Entity, ...]
     assignments: tuple[EntityCandidateAssignment, ...]
@@ -85,31 +96,54 @@ def get_entity_registry_audit(
         raise ValueError("limit must be greater than zero.")
 
     with session_factory() as session:
-        rows = _load_rows(session)
-        items = _build_items(rows)
+        snapshot = evaluate_entity_registry_validity(session)
 
+    return EntityRegistryAuditReport(
+        entity_count=snapshot.entity_count,
+        safe_entity_count=len(snapshot.safe_entity_ids),
+        blocked_entity_count=len(snapshot.blocked_entity_ids),
+        link_count=len(snapshot.items),
+        counts_by_validity=snapshot.counts_by_validity,
+        items=snapshot.items[:limit],
+    )
+
+
+def evaluate_entity_registry_validity(
+        session: Session,
+) -> EntityRegistryValiditySnapshot:
+    """Compute the complete conservative registry validity boundary."""
+
+    rows = _load_rows(session)
+    items = _build_items(rows)
+    grouped_items = _group_by_entity(items)
     entity_safety = {
-        entity_id: all(
+        entity.id: bool(grouped_items.get(entity.id)) and all(
             item.validity is EntityResolutionValidity.ACTIVE
-            for item in entity_items
+            for item in grouped_items.get(entity.id, ())
         )
-        for entity_id, entity_items in _group_by_entity(items).items()
+        for entity in rows.entities
     }
     detached_items = tuple(
         _with_entity_safety(
             item,
             safe_for_downstream_use=entity_safety[item.entity_id],
         )
-        for item in items[:limit]
+        for item in items
     )
     counts = Counter(item.validity for item in items)
-    safe_count = sum(entity_safety.values())
 
-    return EntityRegistryAuditReport(
+    return EntityRegistryValiditySnapshot(
         entity_count=len(rows.entities),
-        safe_entity_count=safe_count,
-        blocked_entity_count=len(rows.entities) - safe_count,
-        link_count=len(items),
+        safe_entity_ids=tuple(
+            entity.id
+            for entity in rows.entities
+            if entity_safety[entity.id]
+        ),
+        blocked_entity_ids=tuple(
+            entity.id
+            for entity in rows.entities
+            if not entity_safety[entity.id]
+        ),
         counts_by_validity=tuple(
             ResolutionValidityCount(
                 validity=validity,

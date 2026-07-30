@@ -525,6 +525,28 @@ evidence for the latest approval without rewriting assignments or earlier
 evidence. Rejection and review suspension likewise remain non-destructive;
 they block downstream use while preserving the complete registry history.
 
+The `argus safe-entities` entrypoint and
+`get_safe_entity_projection()` service form the first enforceable downstream
+boundary over that audit rule. They expose no entity unless every proposal
+link recorded for it is currently `active`. Filtering is entity-atomic: a
+partly invalidated identity is omitted completely instead of returning only
+the assignments whose individual evidence still appears valid.
+
+Each returned entity is a detached immutable projection containing its
+canonical identity, every assigned candidate observation and the exact latest
+approval for every active proposal link. Candidate provenance retains the
+document version, derived artifact, entity mention and assignment decision.
+The projection is ordered by persistent entity identifier, supports a bounded
+result and an optional entity-type filter, and performs no database write.
+
+The projection reuses the same complete validity evaluator as
+`entity-registry-audit`; it does not implement a second interpretation of
+approval state. An entity with no reconstructable proposal links is blocked,
+not accepted through vacuous truth. Downstream analytical services should
+consume this projection rather than query `entities` or
+`entity_candidate_assignments` directly whenever resolved identity is being
+treated as settled.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

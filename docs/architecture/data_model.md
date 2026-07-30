@@ -329,6 +329,22 @@ not claim that a revoked edge proves every candidate assignment false; it
 prevents analytical consumers from treating a partly invalidated identity as
 settled before a later graph-aware repair or split workflow exists.
 
+The safe entity projection is the operational read boundary for that rule. It
+returns an entity atomically or omits it atomically; candidate assignments from
+a blocked entity are never exposed as a partial resolved identity. A projected
+entity includes:
+
+- its persistent identifier, type and canonical candidate;
+- all assigned candidate observations;
+- each candidate's document-version, derived-artifact and mention provenance;
+- the exact decision that originally assigned each candidate;
+- every currently active proposal link and its exact latest approval revision.
+
+The projection is derived at read time and stores no second `safe` flag. Audit
+reporting and downstream selection share one validity evaluator, preventing a
+consumer-facing query from drifting away from the documented review semantics.
+Entities with missing reconstructable evidence are unsafe by default.
+
 ---
 
 ### Statement
