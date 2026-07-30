@@ -838,6 +838,161 @@ class AliasDecision(Base):
     )
 
 
+class Entity(Base):
+    """One persistent identity established through explicit resolution."""
+
+    __tablename__ = "entities"
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(canonical_name)) > 0",
+            name="ck_entities_canonical_name_not_blank",
+        ),
+        UniqueConstraint(
+            "canonical_entity_candidate_id",
+            name="uq_entities_canonical_candidate",
+        ),
+        UniqueConstraint(
+            "created_from_alias_decision_id",
+            name="uq_entities_creation_decision",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_type: Mapped[EntityType] = mapped_column(
+        SQLAlchemyEnum(
+            EntityType,
+            name="entity_type",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    canonical_name: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True,
+    )
+    canonical_entity_candidate_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entity_candidates.id",
+            name=(
+                "fk_entities_canonical_candidate_id_"
+                "entity_candidates"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_from_alias_decision_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "alias_decisions.id",
+            name=(
+                "fk_entities_creation_decision_id_"
+                "alias_decisions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class EntityCandidateAssignment(Base):
+    """Auditable assignment of one candidate observation to an entity."""
+
+    __tablename__ = "entity_candidate_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_candidate_id",
+            name="uq_entity_candidate_assignments_candidate",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entities.id",
+            name="fk_entity_candidate_assignments_entity_id_entities",
+        ),
+        nullable=False,
+        index=True,
+    )
+    entity_candidate_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entity_candidates.id",
+            name=(
+                "fk_entity_candidate_assignments_candidate_id_"
+                "entity_candidates"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    assigned_by_alias_decision_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "alias_decisions.id",
+            name=(
+                "fk_entity_candidate_assignments_decision_id_"
+                "alias_decisions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class EntityResolutionEvidence(Base):
+    """Approved review decision used to establish or extend an entity."""
+
+    __tablename__ = "entity_resolution_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "alias_decision_id",
+            name="uq_entity_resolution_evidence_decision",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entities.id",
+            name="fk_entity_resolution_evidence_entity_id_entities",
+        ),
+        nullable=False,
+        index=True,
+    )
+    alias_decision_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "alias_decisions.id",
+            name=(
+                "fk_entity_resolution_evidence_decision_id_"
+                "alias_decisions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
 class AcquisitionCandidate(Base):
     __tablename__ = "acquisition_candidates"
     __table_args__ = (

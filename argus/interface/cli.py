@@ -49,6 +49,9 @@ from argus.services.alias_review_service import (
     get_alias_review_queue,
     record_alias_decision,
 )
+from argus.services.entity_resolution_service import (
+    resolve_alias_identity,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus
@@ -661,6 +664,52 @@ def decide_alias(
         f"status={result.status.value} "
         f"reviewer={result.reviewer!r} "
         f"reason={result.reason!r}"
+    )
+
+
+@app.command()
+def resolve_alias(
+        proposal_id: int = typer.Option(
+            ...,
+            "--proposal-id",
+            min=1,
+            help="Approved alias proposal to consume.",
+        ),
+        entity_id: int | None = typer.Option(
+            None,
+            "--entity-id",
+            min=1,
+            help="Existing entity to extend; inferred when possible.",
+        ),
+        canonical_candidate_id: int | None = typer.Option(
+            None,
+            "--canonical-candidate-id",
+            min=1,
+            help=(
+                "Proposal candidate chosen as the canonical name when "
+                "creating a new entity."
+            ),
+        ),
+) -> None:
+    """Create or extend one entity from an explicit approved decision."""
+
+    result = resolve_alias_identity(
+        proposal_id=proposal_id,
+        entity_id=entity_id,
+        canonical_candidate_id=canonical_candidate_id,
+    )
+    candidate_ids = ",".join(
+        str(item) for item in result.assigned_candidate_ids
+    )
+    typer.echo(
+        f"entity_id={result.entity_id} "
+        f"created={str(result.entity_created).lower()} "
+        f"type={result.entity_type} "
+        f"canonical_name={result.canonical_name!r} "
+        f"canonical_candidate_id="
+        f"{result.canonical_entity_candidate_id} "
+        f"alias_decision_id={result.alias_decision_id} "
+        f"assigned_candidate_ids={candidate_ids}"
     )
 
 

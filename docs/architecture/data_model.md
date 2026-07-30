@@ -282,8 +282,37 @@ known.
 
 Approval remains deliberately separate from identity resolution. An approved
 decision creates no `Entity`, stores no operational alias and merges no
-candidates. The decision table is a provenance-bearing review ledger that a
-later entity-resolution stage may consume explicitly.
+candidates by itself. The decision table is a provenance-bearing review ledger
+that the entity-resolution stage must consume explicitly.
+
+---
+
+### Entity Registry
+
+The first entity registry consumes one exact latest `approved`
+`AliasDecision` only through an explicit operator action. It never treats a
+heuristic score or an earlier superseded approval as authorization.
+
+Creating an `Entity` requires the operator to select one of the proposal's two
+candidate forms as the canonical name. The registry stores:
+
+- the persistent entity type and canonical name;
+- the exact `EntityCandidate` supplying that name;
+- the exact approval that created the entity;
+- one unique assignment for every candidate observation attached to it;
+- every approved decision subsequently used as resolution evidence.
+
+If one proposal candidate already belongs to an entity, a later approved
+proposal may extend that entity with the unassigned candidate. If both
+candidates already belong to different entities, resolution stops: joining
+two established identities requires a separate future merge workflow with its
+own history.
+
+Registration is idempotent for the same approval and does not rewrite
+candidate, proposal or decision rows. A later review decision may supersede an
+approval, but it does not silently delete historical registry records. Before
+the registry is used as analytical truth, a separate validity and revocation
+view must make such superseded support explicit.
 
 ---
 
@@ -391,6 +420,9 @@ Important properties:
 - merge history.
 
 Entity resolution must preserve uncertainty when two references may or may not identify the same object.
+The initial registry implements only explicit creation and evidence-backed
+candidate assignment. Active periods, external identifiers, canonical-name
+revision, revocation and entity merge history remain later stages.
 
 ---
 

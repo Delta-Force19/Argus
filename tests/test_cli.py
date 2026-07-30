@@ -57,6 +57,9 @@ from argus.services.alias_review_service import (
     AliasReviewQueueReport,
     RecordedAliasDecision,
 )
+from argus.services.entity_resolution_service import (
+    EntityResolutionResult,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -940,6 +943,54 @@ class CLITests(unittest.TestCase):
 
         self.assertNotEqual(result.exit_code, 0)
         record_alias_decision.assert_not_called()
+
+    @patch("argus.interface.cli.resolve_alias_identity")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_resolve_alias_registers_one_approved_identity(
+            self,
+            upgrade_database,
+            configure_logging,
+            resolve_alias_identity,
+    ) -> None:
+        resolve_alias_identity.return_value = EntityResolutionResult(
+            entity_id=61,
+            entity_type="organization",
+            canonical_name="united nations",
+            canonical_entity_candidate_id=12,
+            alias_decision_id=52,
+            assigned_candidate_ids=(11, 12),
+            entity_created=True,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "resolve-alias",
+                "--proposal-id",
+                "41",
+                "--canonical-candidate-id",
+                "12",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        resolve_alias_identity.assert_called_once_with(
+            proposal_id=41,
+            entity_id=None,
+            canonical_candidate_id=12,
+        )
+        self.assertIn(
+            "entity_id=61 created=true type=organization "
+            "canonical_name='united nations'",
+            result.stdout,
+        )
+        self.assertIn(
+            "alias_decision_id=52 assigned_candidate_ids=11,12",
+            result.stdout,
+        )
 
     @patch("argus.interface.cli.get_entity_mention_audit")
     @patch("argus.interface.cli.configure_logging")

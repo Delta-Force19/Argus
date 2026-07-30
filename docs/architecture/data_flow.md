@@ -490,6 +490,23 @@ revision and supersedes the prior decision without mutating it. The command
 has no batch mode, never derives a verdict from confidence, and still creates
 no entity, operational alias or candidate merge.
 
+The first entity registry is an explicit consumer of that review ledger.
+`argus resolve-alias` accepts one proposal whose latest decision is
+`approved`. When no proposal candidate has been resolved yet, the operator
+must select one of the two candidates as the canonical name and a new
+`Entity` is created. When one candidate is already assigned, the other may be
+added to the same entity; an existing entity may also be selected explicitly.
+
+Every candidate assignment and every registry expansion retains the exact
+approval used as evidence. The operation is idempotent for that approval and
+never changes the proposal or decision history. Candidates already assigned
+to two different entities are not merged: the command stops because entity
+merge and canonical-name revision require their own future audited workflow.
+A later decision that supersedes the consumed approval remains visible in the
+append-only review history and does not silently erase historical registry
+rows; an active-validity and revocation view is still required before resolved
+identity is consumed by later analytical layers.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and
