@@ -504,8 +504,26 @@ to two different entities are not merged: the command stops because entity
 merge and canonical-name revision require their own future audited workflow.
 A later decision that supersedes the consumed approval remains visible in the
 append-only review history and does not silently erase historical registry
-rows; an active-validity and revocation view is still required before resolved
-identity is consumed by later analytical layers.
+rows.
+
+The read-only `argus entity-registry-audit` command is the first conservative
+validity boundary over those historical rows. It groups registry evidence by
+entity and alias proposal, compares the applied decisions with the proposal's
+latest review revision and assigns one explicit state:
+
+- `active`: the latest decision is `approved` and that exact approval has been
+  explicitly consumed for the same entity;
+- `pending_reapplication`: the latest decision is another approval, but that
+  exact revision has not yet been consumed;
+- `needs_review`: the latest review suspends operational use;
+- `revoked`: the latest review rejects the alias relationship.
+
+An entity is reported as safe for downstream use only when every proposal link
+recorded for it is `active`. Reapproval therefore does not silently reactivate
+an old application: the operator must run `resolve-alias` again, which appends
+evidence for the latest approval without rewriting assignments or earlier
+evidence. Rejection and review suspension likewise remain non-destructive;
+they block downstream use while preserving the complete registry history.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication

@@ -311,8 +311,23 @@ own history.
 Registration is idempotent for the same approval and does not rewrite
 candidate, proposal or decision rows. A later review decision may supersede an
 approval, but it does not silently delete historical registry records. Before
-the registry is used as analytical truth, a separate validity and revocation
-view must make such superseded support explicit.
+the registry is used as analytical truth, the read-only registry audit derives
+validity from the latest decision for every proposal represented in an
+entity's evidence or candidate assignments.
+
+The derived states are `active`, `pending_reapplication`, `needs_review` and
+`revoked`. Only an exact latest approval already recorded as
+`EntityResolutionEvidence` is active. A newer approval requires another
+explicit resolution action; a newer `needs_review` decision suspends the link;
+a newer rejection revokes it. These are computed states rather than mutable
+columns, so the historical entity, assignments, evidence and decision chain
+remain intact.
+
+The first downstream safety rule is deliberately conservative: an entity is
+safe only when all of its recorded proposal links are active. This rule does
+not claim that a revoked edge proves every candidate assignment false; it
+prevents analytical consumers from treating a partly invalidated identity as
+settled before a later graph-aware repair or split workflow exists.
 
 ---
 

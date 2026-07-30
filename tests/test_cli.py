@@ -60,6 +60,12 @@ from argus.services.alias_review_service import (
 from argus.services.entity_resolution_service import (
     EntityResolutionResult,
 )
+from argus.services.entity_registry_audit_service import (
+    EntityRegistryAuditItem,
+    EntityRegistryAuditReport,
+    EntityResolutionValidity,
+    ResolutionValidityCount,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -989,6 +995,77 @@ class CLITests(unittest.TestCase):
         )
         self.assertIn(
             "alias_decision_id=52 assigned_candidate_ids=11,12",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_entity_registry_audit")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_entity_registry_audit_prints_current_validity(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_entity_registry_audit,
+    ) -> None:
+        get_entity_registry_audit.return_value = (
+            EntityRegistryAuditReport(
+                entity_count=1,
+                safe_entity_count=0,
+                blocked_entity_count=1,
+                link_count=1,
+                counts_by_validity=(
+                    ResolutionValidityCount(
+                        validity=(
+                            EntityResolutionValidity.REVOKED
+                        ),
+                        count=1,
+                    ),
+                ),
+                items=(
+                    EntityRegistryAuditItem(
+                        entity_id=61,
+                        entity_type=EntityType.ORGANIZATION,
+                        canonical_name="united nations",
+                        safe_for_downstream_use=False,
+                        proposal_id=41,
+                        left_candidate_id=11,
+                        right_candidate_id=12,
+                        applied_decision_ids=(52,),
+                        latest_decision_id=53,
+                        latest_revision=3,
+                        latest_status=(
+                            AliasDecisionStatus.REJECTED
+                        ),
+                        validity=EntityResolutionValidity.REVOKED,
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            ["entity-registry-audit", "--limit", "25"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_entity_registry_audit.assert_called_once_with(limit=25)
+        self.assertIn(
+            "entities=1 safe=0 blocked=1 links=1 shown=1",
+            result.stdout,
+        )
+        self.assertIn("validity=revoked links=1", result.stdout)
+        self.assertIn(
+            "entity_id=61 type=organization "
+            "canonical_name='united nations' "
+            "safe_for_downstream=false proposal_id=41",
+            result.stdout,
+        )
+        self.assertIn(
+            "applied_decision_ids=52 latest_decision_id=53 "
+            "latest_revision=3 latest_status=rejected "
+            "validity=revoked",
             result.stdout,
         )
 

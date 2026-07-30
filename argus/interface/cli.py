@@ -52,6 +52,9 @@ from argus.services.alias_review_service import (
 from argus.services.entity_resolution_service import (
     resolve_alias_identity,
 )
+from argus.services.entity_registry_audit_service import (
+    get_entity_registry_audit,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus
@@ -711,6 +714,50 @@ def resolve_alias(
         f"alias_decision_id={result.alias_decision_id} "
         f"assigned_candidate_ids={candidate_ids}"
     )
+
+
+@app.command()
+def entity_registry_audit(
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of entity/proposal links to show.",
+        ),
+) -> None:
+    """Audit current entity-registry validity without changing data."""
+
+    report = get_entity_registry_audit(limit=limit)
+    typer.echo(
+        f"entities={report.entity_count} "
+        f"safe={report.safe_entity_count} "
+        f"blocked={report.blocked_entity_count} "
+        f"links={report.link_count} "
+        f"shown={len(report.items)}"
+    )
+    for count in report.counts_by_validity:
+        typer.echo(
+            f"validity={count.validity.value} links={count.count}"
+        )
+    for item in report.items:
+        applied = ",".join(
+            str(decision_id)
+            for decision_id in item.applied_decision_ids
+        )
+        typer.echo(
+            f"entity entity_id={item.entity_id} "
+            f"type={item.entity_type.value} "
+            f"canonical_name={item.canonical_name!r} "
+            f"safe_for_downstream="
+            f"{str(item.safe_for_downstream_use).lower()} "
+            f"proposal_id={item.proposal_id} "
+            f"candidate_ids="
+            f"{item.left_candidate_id},{item.right_candidate_id} "
+            f"applied_decision_ids={applied or 'none'} "
+            f"latest_decision_id={item.latest_decision_id} "
+            f"latest_revision={item.latest_revision} "
+            f"latest_status={item.latest_status.value} "
+            f"validity={item.validity.value}"
+        )
 
 
 @app.command()
