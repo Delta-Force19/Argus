@@ -287,18 +287,52 @@ that the entity-resolution stage must consume explicitly.
 
 ---
 
+### Candidate Resolution Decision
+
+A `CandidateResolutionDecision` is a separate append-only human decision about
+one exact `EntityCandidate`. It does not masquerade as an alias judgment and
+does not require a second form. Its status is `assigned` or `revoked`; its
+explicit scope is either:
+
+- `single`, covering only the seed candidate; or
+- `exact_canonical`, covering all currently persisted candidates with the same
+  normalized entity type and exact candidate-canonical text.
+
+The broader scope is an operator decision, not an inferred alias. It may group
+separate observations of canonical `un` as one organization, but it never
+expands `un` to `united nations`; that relationship remains the responsibility
+of the alias-review workflow.
+
+Each revision records a non-blank reason and reviewer. Revisions form an
+append-only supersession chain for the seed candidate, and the scope cannot
+change inside that chain. An `assigned` revision either creates a new `Entity`
+from the seed candidate or links the selected candidates to one explicitly
+named existing entity. Every candidate's complete
+`text → ENTITY_MENTIONS → ENTITY_CANDIDATES` provenance is checked before any
+decision or assignment is persisted.
+
+`CandidateResolutionEvidence` records the exact assigned revision applied to
+the entity. A later `revoked` revision adds no new application evidence, so
+registry validity becomes `revoked` without deleting the entity, its
+assignments, the earlier decision or its evidence. Moving an already assigned
+candidate to another entity and merging two entities remain separate future
+workflows and fail closed here.
+
+---
+
 ### Entity Registry
 
-The first entity registry consumes one exact latest `approved`
-`AliasDecision` only through an explicit operator action. It never treats a
-heuristic score or an earlier superseded approval as authorization.
+The entity registry consumes either one exact latest approved `AliasDecision`
+or one explicit `CandidateResolutionDecision`. It never treats a heuristic
+score, string equality alone or an earlier superseded decision as
+authorization.
 
 Creating an `Entity` requires the operator to select one of the proposal's two
 candidate forms as the canonical name. The registry stores:
 
 - the persistent entity type and canonical name;
 - the exact `EntityCandidate` supplying that name;
-- the exact approval that created the entity;
+- exactly one creation decision: alias approval or candidate resolution;
 - one unique assignment for every candidate observation attached to it;
 - every approved decision subsequently used as resolution evidence.
 
@@ -316,12 +350,12 @@ validity from the latest decision for every proposal represented in an
 entity's evidence or candidate assignments.
 
 The derived states are `active`, `pending_reapplication`, `needs_review` and
-`revoked`. Only an exact latest approval already recorded as
-`EntityResolutionEvidence` is active. A newer approval requires another
-explicit resolution action; a newer `needs_review` decision suspends the link;
-a newer rejection revokes it. These are computed states rather than mutable
-columns, so the historical entity, assignments, evidence and decision chain
-remain intact.
+`revoked`. An alias link is active only when its exact latest approval is
+recorded as `EntityResolutionEvidence`; a direct candidate link is active only
+when its exact latest assigned revision is recorded as
+`CandidateResolutionEvidence`. A newer review or revocation blocks the entity.
+These are computed states rather than mutable columns, so historical entities,
+assignments, evidence and decision chains remain intact.
 
 The first downstream safety rule is deliberately conservative: an entity is
 safe only when all of its recorded proposal links are active. This rule does
@@ -337,8 +371,9 @@ entity includes:
 - its persistent identifier, type and canonical candidate;
 - all assigned candidate observations;
 - each candidate's document-version, derived-artifact and mention provenance;
-- the exact decision that originally assigned each candidate;
-- every currently active proposal link and its exact latest approval revision.
+- the exact alias or candidate-resolution decision that originally assigned
+  each candidate;
+- every currently active alias and direct-candidate resolution revision.
 
 The projection is derived at read time and stores no second `safe` flag. Audit
 reporting and downstream selection share one validity evaluator, preventing a
@@ -490,9 +525,10 @@ Important properties:
 - merge history.
 
 Entity resolution must preserve uncertainty when two references may or may not identify the same object.
-The initial registry implements only explicit creation and evidence-backed
-candidate assignment. Active periods, external identifiers, canonical-name
-revision, revocation and entity merge history remain later stages.
+The initial registry implements explicit creation, evidence-backed candidate
+assignment and append-only revocation. Active periods, external identifiers,
+canonical-name revision, reassignment, entity splitting and entity merge
+history remain later stages.
 
 ---
 
@@ -949,3 +985,32 @@ candidate counts again when constructing each item, so an inconsistent
 upstream report is rejected rather than partially consumed. No selection is
 persisted; the entity registry and candidate provenance remain the source of
 truth.
+
+### Document analysis input bundle
+
+`DocumentAnalysisInputBundle` is the detached, immutable handoff to
+entity-dependent analytical code. It contains:
+
+- stable document identity and exact version metadata;
+- raw-artifact identifier and digest;
+- the one text artifact from which all selected mentions and candidates were
+  derived, including its method, version, schema, digest and quality limits;
+- the strict readiness report;
+- the complete safe document entity projection.
+
+The bundle is constructed inside one caller-owned database snapshot. Registry
+validity is evaluated once and reused for coverage and projection. The
+projection occurrence count must equal the readiness `safe_resolved` count,
+and the projection must be unbounded inside the bundle.
+
+Candidate and mention rows do not share one derived-artifact identifier.
+Their valid provenance is the explicit three-stage chain
+`text -> ENTITY_MENTIONS -> ENTITY_CANDIDATES`; each output artifact records
+its exact input artifact and content hash. Missing artifacts, wrong types,
+cross-version links, hash conflicts, mismatched text spans or more than one
+text input make the bundle unavailable. This contract corrects and replaces
+the earlier simplified assumption that candidate and mention projections
+should carry the same artifact identifier.
+
+The bundle is a read model only. It introduces no table, cache, readiness flag
+or mutable analysis state.

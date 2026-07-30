@@ -16,10 +16,14 @@ from argus.models import (
     EntityMention,
 )
 from argus.services.entity_registry_audit_service import (
+    CandidateResolutionAuditItem,
     EntityRegistryAuditItem,
     EntityRegistryValiditySnapshot,
     EntityResolutionValidity,
     evaluate_entity_registry_validity,
+)
+from argus.services.entity_candidate_provenance_service import (
+    resolve_entity_candidate_provenance,
 )
 
 
@@ -59,6 +63,7 @@ class DocumentEntityCoverageItem:
     assigned_by_alias_decision_id: int | None
     blocking_validities: tuple[EntityResolutionValidity, ...]
     provenance_issue: str | None
+    assigned_by_candidate_resolution_decision_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +114,7 @@ def get_document_entity_coverage(
             )
 
         validity = evaluate_entity_registry_validity(session)
-        report = _build_report(
+        report = evaluate_document_entity_coverage(
             session,
             document_version=document_version,
             validity=validity,
@@ -141,7 +146,7 @@ def get_document_entity_coverage_batch(
         )
         validity = evaluate_entity_registry_validity(session)
         return tuple(
-            _build_report(
+            evaluate_document_entity_coverage(
                 session,
                 document_version=document_version,
                 validity=validity,
@@ -152,7 +157,7 @@ def get_document_entity_coverage_batch(
         )
 
 
-def _build_report(
+def evaluate_document_entity_coverage(
         session: Session,
         *,
         document_version: DocumentVersion,
@@ -160,7 +165,10 @@ def _build_report(
         limit: int,
         entity_type: EntityType | None,
 ) -> DocumentEntityCoverageReport:
-    blocking_by_entity = _blocking_validities_by_entity(validity.items)
+    blocking_by_entity = _blocking_validities_by_entity(
+        validity.items,
+        validity.candidate_items,
+    )
     rows = _load_rows(
         session,
         document_version_id=document_version.id,
@@ -168,6 +176,7 @@ def _build_report(
     )
     items = tuple(
         _classify_row(
+            session,
             row,
             document_version_id=document_version.id,
             safe_entity_ids=validity.safe_entity_ids,
@@ -249,9 +258,14 @@ def _load_rows(
 
 def _blocking_validities_by_entity(
         items: tuple[EntityRegistryAuditItem, ...],
+        candidate_items: tuple[CandidateResolutionAuditItem, ...],
 ) -> dict[int, tuple[EntityResolutionValidity, ...]]:
     grouped: dict[int, set[EntityResolutionValidity]] = defaultdict(set)
     for item in items:
+        if item.safe_for_downstream_use:
+            continue
+        grouped[item.entity_id].add(item.validity)
+    for item in candidate_items:
         if item.safe_for_downstream_use:
             continue
         grouped[item.entity_id].add(item.validity)
@@ -266,6 +280,7 @@ def _blocking_validities_by_entity(
 
 
 def _classify_row(
+        session: Session,
         row: _CoverageRow,
         *,
         document_version_id: int,
@@ -276,10 +291,20 @@ def _classify_row(
             tuple[EntityResolutionValidity, ...],
         ],
 ) -> DocumentEntityCoverageItem:
-    issue = _provenance_issue(
-        row,
-        document_version_id=document_version_id,
-    )
+    if row.assignment is not None and row.entity is None:
+        issue = "Entity candidate assignment references a missing entity."
+    elif (
+        row.entity is not None
+        and row.entity.entity_type is not row.candidate.entity_type
+    ):
+        issue = "Entity candidate and assigned entity use different types."
+    else:
+        _, issue = resolve_entity_candidate_provenance(
+            session,
+            candidate=row.candidate,
+            mention=row.mention,
+            document_version_id=document_version_id,
+        )
     entity_id = (
         row.assignment.entity_id
         if row.assignment is not None
@@ -328,6 +353,12 @@ def _classify_row(
             if row.assignment is not None
             else None
         ),
+        assigned_by_candidate_resolution_decision_id=(
+            row.assignment
+            .assigned_by_candidate_resolution_decision_id
+            if row.assignment is not None
+            else None
+        ),
         blocking_validities=(
             blocking_by_entity.get(entity_id, ())
             if status is DocumentEntityCoverageStatus.BLOCKED
@@ -335,30 +366,3 @@ def _classify_row(
         ),
         provenance_issue=issue,
     )
-
-
-def _provenance_issue(
-        row: _CoverageRow,
-        *,
-        document_version_id: int,
-) -> str | None:
-    mention = row.mention
-    if mention is None:
-        return "Entity candidate references a missing mention."
-    if mention.document_version_id != document_version_id:
-        return "Entity candidate and mention use different documents."
-    if (
-        mention.derived_artifact_id
-        != row.candidate.derived_artifact_id
-    ):
-        return "Entity candidate and mention use different artifacts."
-    if mention.entity_type is not row.candidate.entity_type:
-        return "Entity candidate and mention use different types."
-    if row.assignment is not None and row.entity is None:
-        return "Entity candidate assignment references a missing entity."
-    if (
-        row.entity is not None
-        and row.entity.entity_type is not row.candidate.entity_type
-    ):
-        return "Entity candidate and assigned entity use different types."
-    return None

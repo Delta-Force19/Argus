@@ -52,6 +52,9 @@ from argus.services.alias_review_service import (
 from argus.services.entity_resolution_service import (
     resolve_alias_identity,
 )
+from argus.services.candidate_resolution_service import (
+    resolve_candidate_identity,
+)
 from argus.services.entity_registry_audit_service import (
     get_entity_registry_audit,
 )
@@ -74,9 +77,18 @@ from argus.services.corpus_entity_readiness_service import (
 from argus.services.ready_document_selector_service import (
     select_ready_document_versions,
 )
+from argus.services.document_analysis_input_service import (
+    get_document_analysis_input,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
-from argus.knowledge import AliasDecisionStatus, EntityType
+from argus.knowledge import (
+    AliasDecisionStatus,
+    CandidateResolutionScope,
+    CandidateResolutionStatus,
+    EntityType,
+    ManualCandidateResolutionDecision,
+)
 from argus.services.operational_pipeline_service import (
     run_operational_pipeline,
 )
@@ -736,6 +748,80 @@ def resolve_alias(
 
 
 @app.command()
+def resolve_candidate(
+        candidate_id: int = typer.Option(
+            ...,
+            "--candidate-id",
+            min=1,
+            help="Seed entity candidate for the explicit decision.",
+        ),
+        status: CandidateResolutionStatus = typer.Option(
+            ...,
+            "--status",
+            case_sensitive=False,
+            help="Manual outcome: assigned or revoked.",
+        ),
+        scope: CandidateResolutionScope = typer.Option(
+            CandidateResolutionScope.SINGLE,
+            "--scope",
+            case_sensitive=False,
+            help="Scope: single or exact_canonical.",
+        ),
+        entity_id: int | None = typer.Option(
+            None,
+            "--entity-id",
+            min=1,
+            help=(
+                "Existing entity to link. Omit on the first assigned "
+                "revision to create a new entity."
+            ),
+        ),
+        reason: str = typer.Option(
+            ...,
+            "--reason",
+            help="Evidence-based reason for the identity decision.",
+        ),
+        reviewer: str = typer.Option(
+            ...,
+            "--reviewer",
+            help="Identifier of the human reviewer.",
+        ),
+) -> None:
+    """Create, link or revoke an explicit candidate identity."""
+
+    result = resolve_candidate_identity(
+        candidate_id=candidate_id,
+        entity_id=entity_id,
+        decision=ManualCandidateResolutionDecision(
+            status=status,
+            scope=scope,
+            reason=reason,
+            reviewer=reviewer,
+        ),
+    )
+    matched_ids = ",".join(
+        str(item) for item in result.matched_candidate_ids
+    )
+    assigned_ids = ",".join(
+        str(item) for item in result.newly_assigned_candidate_ids
+    )
+    typer.echo(
+        f"decision_id={result.decision_id} "
+        f"revision={result.revision} "
+        f"supersedes={result.supersedes_decision_id} "
+        f"status={result.status.value} "
+        f"scope={result.scope.value} "
+        f"seed_candidate_id={result.seed_entity_candidate_id} "
+        f"entity_id={result.entity_id} "
+        f"entity_created={str(result.entity_created).lower()} "
+        f"type={result.entity_type} "
+        f"canonical_name={result.canonical_name!r} "
+        f"matched_candidate_ids={matched_ids} "
+        f"newly_assigned_candidate_ids={assigned_ids or 'none'}"
+    )
+
+
+@app.command()
 def entity_registry_audit(
         limit: int = typer.Option(
             50,
@@ -751,7 +837,8 @@ def entity_registry_audit(
         f"safe={report.safe_entity_count} "
         f"blocked={report.blocked_entity_count} "
         f"links={report.link_count} "
-        f"shown={len(report.items)}"
+        f"shown={len(report.items)} "
+        f"candidate_shown={len(report.candidate_items)}"
     )
     for count in report.counts_by_validity:
         typer.echo(
@@ -771,6 +858,26 @@ def entity_registry_audit(
             f"proposal_id={item.proposal_id} "
             f"candidate_ids="
             f"{item.left_candidate_id},{item.right_candidate_id} "
+            f"applied_decision_ids={applied or 'none'} "
+            f"latest_decision_id={item.latest_decision_id} "
+            f"latest_revision={item.latest_revision} "
+            f"latest_status={item.latest_status.value} "
+            f"validity={item.validity.value}"
+        )
+    for item in report.candidate_items:
+        applied = ",".join(
+            str(decision_id)
+            for decision_id in item.applied_decision_ids
+        )
+        typer.echo(
+            f"candidate_resolution entity_id={item.entity_id} "
+            f"type={item.entity_type.value} "
+            f"canonical_name={item.canonical_name!r} "
+            f"safe_for_downstream="
+            f"{str(item.safe_for_downstream_use).lower()} "
+            f"seed_candidate_id={item.seed_candidate_id} "
+            f"seed_canonical={item.seed_canonical_text!r} "
+            f"scope={item.scope.value} "
             f"applied_decision_ids={applied or 'none'} "
             f"latest_decision_id={item.latest_decision_id} "
             f"latest_revision={item.latest_revision} "
@@ -811,6 +918,12 @@ def safe_entities(
             str(link.latest_alias_decision_id)
             for link in entity.active_resolutions
         )
+        candidate_decision_ids = ",".join(
+            str(
+                link.latest_candidate_resolution_decision_id
+            )
+            for link in entity.active_candidate_resolutions
+        )
         typer.echo(
             f"entity entity_id={entity.entity_id} "
             f"type={entity.entity_type.value} "
@@ -818,7 +931,9 @@ def safe_entities(
             f"canonical_candidate_id="
             f"{entity.canonical_entity_candidate_id} "
             f"candidate_ids={candidate_ids} "
-            f"active_decision_ids={decision_ids}"
+            f"active_decision_ids={decision_ids or 'none'} "
+            f"active_candidate_decision_ids="
+            f"{candidate_decision_ids or 'none'}"
         )
 
 
@@ -861,6 +976,12 @@ def document_entities(
             str(link.latest_alias_decision_id)
             for link in entity.active_resolutions
         )
+        candidate_decision_ids = ",".join(
+            str(
+                link.latest_candidate_resolution_decision_id
+            )
+            for link in entity.active_candidate_resolutions
+        )
         typer.echo(
             f"entity entity_id={entity.entity_id} "
             f"type={entity.entity_type.value} "
@@ -868,7 +989,9 @@ def document_entities(
             f"canonical_candidate_id="
             f"{entity.canonical_entity_candidate_id} "
             f"occurrences={len(entity.occurrences)} "
-            f"active_decision_ids={decision_ids}"
+            f"active_decision_ids={decision_ids or 'none'} "
+            f"active_candidate_decision_ids="
+            f"{candidate_decision_ids or 'none'}"
         )
         for occurrence in entity.occurrences:
             typer.echo(
@@ -880,7 +1003,17 @@ def document_entities(
                 f"surface={occurrence.surface_text!r} "
                 f"canonical={occurrence.canonical_text!r} "
                 f"assignment_decision_id="
-                f"{occurrence.assigned_by_alias_decision_id}"
+                f"{(
+                    occurrence.assigned_by_alias_decision_id
+                    or occurrence
+                    .assigned_by_candidate_resolution_decision_id
+                    or 'none'
+                )} "
+                f"candidate_assignment_decision_id="
+                f"{(
+                    occurrence
+                    .assigned_by_candidate_resolution_decision_id
+                ) or 'none'}"
             )
 
 
@@ -939,12 +1072,18 @@ def document_entity_coverage(
             f"coverage={item.status.value} "
             f"entity_id={item.entity_id or 'none'} "
             f"assignment_decision_id="
-            f"{item.assigned_by_alias_decision_id or 'none'} "
+            f"{(
+                item.assigned_by_alias_decision_id
+                or item.assigned_by_candidate_resolution_decision_id
+                or 'none'
+            )} "
             f"blocking_validities={blocking or 'none'} "
             f"span={span} "
             f"surface={item.surface_text!r} "
             f"canonical={item.canonical_text!r} "
-            f"provenance_issue={item.provenance_issue!r}"
+            f"provenance_issue={item.provenance_issue!r} "
+            f"candidate_assignment_decision_id="
+            f"{item.assigned_by_candidate_resolution_decision_id or 'none'}"
         )
 
 
@@ -1076,6 +1215,57 @@ def ready_document_versions(
             f"version={item.version_number} "
             f"candidates={item.candidate_count} "
             f"safe_resolved={item.safe_resolved_count}"
+        )
+
+
+@app.command()
+def document_analysis_input(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact ready document version to bundle.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type readiness boundary.",
+        ),
+) -> None:
+    """Build one atomic input for entity-dependent document analysis."""
+
+    bundle = get_document_analysis_input(
+        document_version_id=document_version_id,
+        entity_type=entity_type,
+    )
+    document = bundle.document
+    typer.echo(
+        f"document_version_id={document.document_version_id} "
+        f"document_id={document.document_id} "
+        f"version={document.version_number} "
+        f"type={bundle.entity_type.value if bundle.entity_type else 'all'} "
+        f"status={bundle.readiness.status.value} "
+        f"candidates={bundle.readiness.candidate_count} "
+        f"entities={bundle.entities.resolved_entity_count} "
+        f"occurrences={bundle.entities.resolved_occurrence_count}"
+    )
+    typer.echo(
+        f"text_artifact_id={bundle.text.derived_artifact_id} "
+        f"text_type={bundle.text.artifact_type.value} "
+        f"text_hash={bundle.text.content_hash} "
+        f"characters={bundle.text.character_count} "
+        f"raw_artifact_id={document.raw_artifact_id} "
+        f"raw_hash={document.raw_content_hash}"
+    )
+    for entity in bundle.entities.items:
+        typer.echo(
+            f"entity entity_id={entity.entity_id} "
+            f"entity_type={entity.entity_type.value} "
+            f"canonical_name={entity.canonical_name!r} "
+            f"occurrences={len(entity.occurrences)} "
+            f"active_alias_resolutions={len(entity.active_resolutions)} "
+            f"active_candidate_resolutions="
+            f"{len(entity.active_candidate_resolutions)}"
         )
 
 

@@ -24,6 +24,8 @@ from argus.endpoints import EndpointType
 from argus.knowledge import (
     AliasDecisionStatus,
     AliasSignalType,
+    CandidateResolutionScope,
+    CandidateResolutionStatus,
     EntityType,
 )
 
@@ -855,6 +857,20 @@ class Entity(Base):
             "created_from_alias_decision_id",
             name="uq_entities_creation_decision",
         ),
+        UniqueConstraint(
+            "created_from_candidate_resolution_decision_id",
+            name="uq_entities_candidate_creation_decision",
+        ),
+        CheckConstraint(
+            "("
+            "created_from_alias_decision_id IS NOT NULL "
+            "AND created_from_candidate_resolution_decision_id IS NULL"
+            ") OR ("
+            "created_from_alias_decision_id IS NULL "
+            "AND created_from_candidate_resolution_decision_id IS NOT NULL"
+            ")",
+            name="ck_entities_exactly_one_creation_decision",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -888,7 +904,7 @@ class Entity(Base):
         nullable=False,
         index=True,
     )
-    created_from_alias_decision_id: Mapped[int] = mapped_column(
+    created_from_alias_decision_id: Mapped[int | None] = mapped_column(
         ForeignKey(
             "alias_decisions.id",
             name=(
@@ -896,7 +912,20 @@ class Entity(Base):
                 "alias_decisions"
             ),
         ),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    created_from_candidate_resolution_decision_id: Mapped[
+        int | None
+    ] = mapped_column(
+        ForeignKey(
+            "candidate_resolution_decisions.id",
+            name=(
+                "fk_entities_candidate_creation_decision_id_"
+                "candidate_resolution_decisions"
+            ),
+        ),
+        nullable=True,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -914,6 +943,16 @@ class EntityCandidateAssignment(Base):
         UniqueConstraint(
             "entity_candidate_id",
             name="uq_entity_candidate_assignments_candidate",
+        ),
+        CheckConstraint(
+            "("
+            "assigned_by_alias_decision_id IS NOT NULL "
+            "AND assigned_by_candidate_resolution_decision_id IS NULL"
+            ") OR ("
+            "assigned_by_alias_decision_id IS NULL "
+            "AND assigned_by_candidate_resolution_decision_id IS NOT NULL"
+            ")",
+            name="ck_entity_assignments_exactly_one_decision",
         ),
     )
 
@@ -937,7 +976,7 @@ class EntityCandidateAssignment(Base):
         nullable=False,
         index=True,
     )
-    assigned_by_alias_decision_id: Mapped[int] = mapped_column(
+    assigned_by_alias_decision_id: Mapped[int | None] = mapped_column(
         ForeignKey(
             "alias_decisions.id",
             name=(
@@ -945,7 +984,20 @@ class EntityCandidateAssignment(Base):
                 "alias_decisions"
             ),
         ),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    assigned_by_candidate_resolution_decision_id: Mapped[
+        int | None
+    ] = mapped_column(
+        ForeignKey(
+            "candidate_resolution_decisions.id",
+            name=(
+                "fk_entity_assignments_candidate_decision_id_"
+                "candidate_resolution_decisions"
+            ),
+        ),
+        nullable=True,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -981,6 +1033,151 @@ class EntityResolutionEvidence(Base):
             name=(
                 "fk_entity_resolution_evidence_decision_id_"
                 "alias_decisions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class CandidateResolutionDecision(Base):
+    """Append-only decision about one candidate and an explicit scope."""
+
+    __tablename__ = "candidate_resolution_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_candidate_resolution_revision_positive",
+        ),
+        CheckConstraint(
+            "length(trim(reason)) > 0",
+            name="ck_candidate_resolution_reason_not_blank",
+        ),
+        CheckConstraint(
+            "length(trim(reviewer)) > 0",
+            name="ck_candidate_resolution_reviewer_not_blank",
+        ),
+        UniqueConstraint(
+            "seed_entity_candidate_id",
+            "revision",
+            name="uq_candidate_resolution_candidate_revision",
+        ),
+        UniqueConstraint(
+            "supersedes_candidate_resolution_decision_id",
+            name="uq_candidate_resolution_supersedes",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    seed_entity_candidate_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entity_candidates.id",
+            name=(
+                "fk_candidate_resolution_seed_candidate_id_"
+                "entity_candidates"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    supersedes_candidate_resolution_decision_id: Mapped[
+        int | None
+    ] = mapped_column(
+        ForeignKey(
+            "candidate_resolution_decisions.id",
+            name=(
+                "fk_candidate_resolution_supersedes_id_"
+                "candidate_resolution_decisions"
+            ),
+        ),
+        nullable=True,
+        index=True,
+    )
+    status: Mapped[CandidateResolutionStatus] = mapped_column(
+        SQLAlchemyEnum(
+            CandidateResolutionStatus,
+            name="candidate_resolution_status",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    scope: Mapped[CandidateResolutionScope] = mapped_column(
+        SQLAlchemyEnum(
+            CandidateResolutionScope,
+            name="candidate_resolution_scope",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    entity_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "entities.id",
+            name=(
+                "fk_candidate_resolution_entity_id_entities"
+            ),
+        ),
+        nullable=True,
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewer: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class CandidateResolutionEvidence(Base):
+    """Exact candidate-resolution revision applied to one entity."""
+
+    __tablename__ = "candidate_resolution_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_resolution_decision_id",
+            name="uq_candidate_resolution_evidence_decision",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entities.id",
+            name=(
+                "fk_candidate_resolution_evidence_entity_id_entities"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    candidate_resolution_decision_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "candidate_resolution_decisions.id",
+            name=(
+                "fk_candidate_resolution_evidence_decision_id_"
+                "candidate_resolution_decisions"
             ),
         ),
         nullable=False,

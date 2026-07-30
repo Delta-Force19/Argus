@@ -60,6 +60,9 @@ from argus.services.alias_review_service import (
 from argus.services.entity_resolution_service import (
     EntityResolutionResult,
 )
+from argus.services.candidate_resolution_service import (
+    CandidateResolutionResult,
+)
 from argus.services.entity_registry_audit_service import (
     EntityRegistryAuditItem,
     EntityRegistryAuditReport,
@@ -95,6 +98,12 @@ from argus.services.ready_document_selector_service import (
     ReadyDocumentSelection,
     ReadyDocumentVersion,
 )
+from argus.services.document_analysis_input_service import (
+    AnalysisInputDocument,
+    AnalysisInputText,
+    DocumentAnalysisInputBundle,
+)
+from argus.documents import DerivedArtifactType, DocumentType
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -102,7 +111,10 @@ from argus.services.latest_news_service import (
 from argus.knowledge import (
     AliasDecisionStatus,
     AliasSignalType,
+    CandidateResolutionScope,
+    CandidateResolutionStatus,
     EntityType,
+    ManualCandidateResolutionDecision,
 )
 from argus.services.operational_pipeline_service import (
     OperationalPipelineReport,
@@ -113,6 +125,195 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.resolve_candidate_identity")
+    def test_resolve_candidate_records_explicit_scoped_decision(
+            self,
+            resolve_candidate_identity,
+    ) -> None:
+        resolve_candidate_identity.return_value = (
+            CandidateResolutionResult(
+                decision_id=81,
+                revision=1,
+                supersedes_decision_id=None,
+                status=CandidateResolutionStatus.ASSIGNED,
+                scope=CandidateResolutionScope.EXACT_CANONICAL,
+                seed_entity_candidate_id=11,
+                entity_id=61,
+                entity_type="organization",
+                canonical_name="un",
+                entity_created=True,
+                matched_candidate_ids=(11, 15, 22),
+                newly_assigned_candidate_ids=(11, 15, 22),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "resolve-candidate",
+                "--candidate-id",
+                "11",
+                "--status",
+                "assigned",
+                "--scope",
+                "exact_canonical",
+                "--reason",
+                "Reviewed exact normalized form.",
+                "--reviewer",
+                "Victor",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        resolve_candidate_identity.assert_called_once_with(
+            candidate_id=11,
+            entity_id=None,
+            decision=ManualCandidateResolutionDecision(
+                status=CandidateResolutionStatus.ASSIGNED,
+                scope=CandidateResolutionScope.EXACT_CANONICAL,
+                reason="Reviewed exact normalized form.",
+                reviewer="Victor",
+            ),
+        )
+        self.assertIn(
+            "decision_id=81 revision=1 supersedes=None "
+            "status=assigned scope=exact_canonical "
+            "seed_candidate_id=11 entity_id=61 "
+            "entity_created=true type=organization "
+            "canonical_name='un' matched_candidate_ids=11,15,22 "
+            "newly_assigned_candidate_ids=11,15,22",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_document_analysis_input")
+    def test_document_analysis_input_prints_atomic_bundle(
+            self,
+            get_document_analysis_input,
+    ) -> None:
+        readiness = DocumentEntityReadinessReport(
+            document_version_id=21,
+            document_id=20,
+            version_number=2,
+            entity_type=EntityType.ORGANIZATION,
+            status=DocumentEntityReadinessStatus.READY,
+            ready_for_downstream_use=True,
+            candidate_count=2,
+            safe_resolved_count=2,
+            unassigned_count=0,
+            blocked_count=0,
+            invalid_provenance_count=0,
+        )
+        entities = DocumentEntityProjection(
+            document_version_id=21,
+            document_id=20,
+            version_number=2,
+            resolved_entity_count=1,
+            resolved_occurrence_count=2,
+            items=(
+                DocumentResolvedEntity(
+                    entity_id=31,
+                    entity_type=EntityType.ORGANIZATION,
+                    canonical_name="united nations",
+                    canonical_entity_candidate_id=42,
+                    occurrences=tuple(
+                        ResolvedEntityOccurrence(
+                            entity_candidate_id=40 + index,
+                            entity_mention_id=50 + index,
+                            derived_artifact_id=60,
+                            canonical_text=canonical_text,
+                            surface_text=surface_text,
+                            normalized_text=surface_text.casefold(),
+                            source_label="ORG",
+                            start_char=start_char,
+                            end_char=start_char + len(surface_text),
+                            assigned_by_alias_decision_id=70,
+                        )
+                        for index, (
+                            canonical_text,
+                            surface_text,
+                            start_char,
+                        ) in enumerate(
+                            (
+                                ("un", "UN", 0),
+                                (
+                                    "united nations",
+                                    "United Nations",
+                                    11,
+                                ),
+                            )
+                        )
+                    ),
+                    active_resolutions=(),
+                ),
+            ),
+        )
+        get_document_analysis_input.return_value = (
+            DocumentAnalysisInputBundle(
+                entity_type=EntityType.ORGANIZATION,
+                document=AnalysisInputDocument(
+                    document_id=20,
+                    document_version_id=21,
+                    version_number=2,
+                    document_type=DocumentType.ARTICLE,
+                    identifier_scheme="url",
+                    identifier_value="https://example.test/article",
+                    title="UN article",
+                    language="en",
+                    source_id=3,
+                    raw_artifact_id=10,
+                    raw_content_hash="a" * 64,
+                    raw_hash_algorithm="sha256",
+                    media_type="text/html",
+                    published_at=None,
+                ),
+                text=AnalysisInputText(
+                    derived_artifact_id=11,
+                    artifact_type=DerivedArtifactType.EXTRACTED_TEXT,
+                    method="trafilatura",
+                    method_version="1",
+                    schema_version="1",
+                    content_hash="b" * 64,
+                    text="UN and the United Nations.",
+                    character_count=26,
+                    quality_limitations=(),
+                ),
+                readiness=readiness,
+                entities=entities,
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "document-analysis-input",
+                "--document-version-id",
+                "21",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_document_analysis_input.assert_called_once_with(
+            document_version_id=21,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "document_version_id=21 document_id=20 version=2 "
+            "type=organization status=ready candidates=2 "
+            "entities=1 occurrences=2",
+            result.stdout,
+        )
+        self.assertIn(
+            "text_artifact_id=11 text_type=extracted_text",
+            result.stdout,
+        )
+        self.assertIn(
+            "entity entity_id=31 entity_type=organization "
+            "canonical_name='united nations'",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.select_ready_document_versions")
     def test_ready_document_versions_prints_safe_selection(
             self,

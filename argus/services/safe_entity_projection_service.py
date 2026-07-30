@@ -13,6 +13,7 @@ from argus.models import (
     EntityCandidateAssignment,
 )
 from argus.services.entity_registry_audit_service import (
+    CandidateResolutionAuditItem,
     EntityRegistryAuditItem,
     EntityResolutionValidity,
     evaluate_entity_registry_validity,
@@ -30,7 +31,8 @@ class SafeEntityCandidate:
     document_version_id: int
     derived_artifact_id: int
     entity_mention_id: int
-    assigned_by_alias_decision_id: int
+    assigned_by_alias_decision_id: int | None
+    assigned_by_candidate_resolution_decision_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,16 @@ class ActiveEntityResolution:
 
 
 @dataclass(frozen=True, slots=True)
+class ActiveCandidateResolution:
+    """One active direct candidate-resolution link."""
+
+    seed_candidate_id: int
+    scope: str
+    latest_candidate_resolution_decision_id: int
+    latest_revision: int
+
+
+@dataclass(frozen=True, slots=True)
 class SafeEntity:
     """Detached persistent identity safe for analytical consumption."""
 
@@ -52,9 +64,14 @@ class SafeEntity:
     entity_type: EntityType
     canonical_name: str
     canonical_entity_candidate_id: int
-    created_from_alias_decision_id: int
+    created_from_alias_decision_id: int | None
     candidates: tuple[SafeEntityCandidate, ...]
     active_resolutions: tuple[ActiveEntityResolution, ...]
+    created_from_candidate_resolution_decision_id: int | None = None
+    active_candidate_resolutions: tuple[
+        ActiveCandidateResolution,
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,11 +127,15 @@ def get_safe_entity_projection(
             ),
         )
         links_by_entity = _active_links_by_entity(snapshot.items)
+        candidate_links_by_entity = _active_candidate_links_by_entity(
+            snapshot.candidate_items
+        )
         items = _build_safe_entities(
             entities=selected_entities,
             assignments=assignments,
             candidates=candidates,
             links_by_entity=links_by_entity,
+            candidate_links_by_entity=candidate_links_by_entity,
         )
 
     return SafeEntityProjection(
@@ -179,12 +200,34 @@ def _active_links_by_entity(
     }
 
 
+def _active_candidate_links_by_entity(
+        items: tuple[CandidateResolutionAuditItem, ...],
+) -> dict[int, tuple[CandidateResolutionAuditItem, ...]]:
+    grouped: dict[int, list[CandidateResolutionAuditItem]] = defaultdict(list)
+    for item in items:
+        if not item.safe_for_downstream_use:
+            continue
+        if item.validity is not EntityResolutionValidity.ACTIVE:
+            raise ValueError(
+                "Safe candidate resolution is not active."
+            )
+        grouped[item.entity_id].append(item)
+    return {
+        entity_id: tuple(entity_items)
+        for entity_id, entity_items in grouped.items()
+    }
+
+
 def _build_safe_entities(
         *,
         entities: tuple[Entity, ...],
         assignments: tuple[EntityCandidateAssignment, ...],
         candidates: dict[int, EntityCandidate],
         links_by_entity: dict[int, tuple[EntityRegistryAuditItem, ...]],
+        candidate_links_by_entity: dict[
+            int,
+            tuple[CandidateResolutionAuditItem, ...],
+        ],
 ) -> tuple[SafeEntity, ...]:
     assignments_by_entity: dict[
         int,
@@ -197,7 +240,11 @@ def _build_safe_entities(
     for entity in entities:
         entity_assignments = assignments_by_entity.get(entity.id, [])
         entity_links = links_by_entity.get(entity.id, ())
-        if not entity_assignments or not entity_links:
+        candidate_links = candidate_links_by_entity.get(entity.id, ())
+        if (
+                not entity_assignments
+                or not (entity_links or candidate_links)
+        ):
             raise ValueError(
                 "Safe entity is missing assignments or active evidence."
             )
@@ -231,6 +278,10 @@ def _build_safe_entities(
                 created_from_alias_decision_id=(
                     entity.created_from_alias_decision_id
                 ),
+                created_from_candidate_resolution_decision_id=(
+                    entity
+                    .created_from_candidate_resolution_decision_id
+                ),
                 candidates=projected_candidates,
                 active_resolutions=tuple(
                     ActiveEntityResolution(
@@ -243,6 +294,17 @@ def _build_safe_entities(
                         latest_revision=item.latest_revision,
                     )
                     for item in entity_links
+                ),
+                active_candidate_resolutions=tuple(
+                    ActiveCandidateResolution(
+                        seed_candidate_id=item.seed_candidate_id,
+                        scope=item.scope.value,
+                        latest_candidate_resolution_decision_id=(
+                            item.latest_decision_id
+                        ),
+                        latest_revision=item.latest_revision,
+                    )
+                    for item in candidate_links
                 ),
             )
         )
@@ -273,5 +335,9 @@ def _project_candidate(
         entity_mention_id=candidate.entity_mention_id,
         assigned_by_alias_decision_id=(
             assignment.assigned_by_alias_decision_id
+        ),
+        assigned_by_candidate_resolution_decision_id=(
+            assignment
+            .assigned_by_candidate_resolution_decision_id
         ),
     )

@@ -490,6 +490,24 @@ revision and supersedes the prior decision without mutating it. The command
 has no batch mode, never derives a verdict from confidence, and still creates
 no entity, operational alias or candidate merge.
 
+Direct candidate resolution is a separate operator path for candidates that do
+not require an alias pair. `argus resolve-candidate` accepts one seed candidate,
+an `assigned` or `revoked` status, a reason, a reviewer and an explicit scope.
+With `--scope single`, only the seed observation is covered. With
+`--scope exact_canonical`, all currently persisted candidates having the same
+entity type and exact canonical text are covered in stable identifier order.
+This scope never joins a different form: `un` and `united nations` still
+require a reviewed alias decision.
+
+An initial assigned decision creates a new entity when `--entity-id` is
+omitted, or links to that existing entity when it is supplied. Before writing,
+the service verifies the full immutable
+`text → ENTITY_MENTIONS → ENTITY_CANDIDATES` chain for every selected
+candidate, rejects type conflicts and refuses implicit reassignment or entity
+merge. Candidate decisions form their own append-only revision history.
+Revocation preserves assignments and earlier evidence but makes the direct
+resolution link unsafe in the shared registry validity snapshot.
+
 The first entity registry is an explicit consumer of that review ledger.
 `argus resolve-alias` accepts one proposal whose latest decision is
 `approved`. When no proposal candidate has been resolved yet, the operator
@@ -507,9 +525,9 @@ append-only review history and does not silently erase historical registry
 rows.
 
 The read-only `argus entity-registry-audit` command is the first conservative
-validity boundary over those historical rows. It groups registry evidence by
-entity and alias proposal, compares the applied decisions with the proposal's
-latest review revision and assigns one explicit state:
+validity boundary over those historical rows. It groups both alias evidence
+and direct candidate-resolution evidence by entity, compares each application
+with its latest review revision and assigns one explicit state:
 
 - `active`: the latest decision is `approved` and that exact approval has been
   explicitly consumed for the same entity;
@@ -518,12 +536,13 @@ latest review revision and assigns one explicit state:
 - `needs_review`: the latest review suspends operational use;
 - `revoked`: the latest review rejects the alias relationship.
 
-An entity is reported as safe for downstream use only when every proposal link
-recorded for it is `active`. Reapproval therefore does not silently reactivate
-an old application: the operator must run `resolve-alias` again, which appends
-evidence for the latest approval without rewriting assignments or earlier
-evidence. Rejection and review suspension likewise remain non-destructive;
-they block downstream use while preserving the complete registry history.
+An entity is reported as safe for downstream use only when every alias and
+direct-candidate link recorded for it is `active`. Reapproval therefore does
+not silently reactivate an old application: the operator must run
+`resolve-alias` again, which appends evidence for the latest approval without
+rewriting assignments or earlier evidence. Candidate revocation, alias
+rejection and review suspension likewise remain non-destructive; they block
+downstream use while preserving the complete registry history.
 
 The `argus safe-entities` entrypoint and
 `get_safe_entity_projection()` service form the first enforceable downstream
@@ -635,6 +654,33 @@ is exactly `ready`; no unsafe status is represented in the result type.
 The complete ready count remains independent of the selection limit, and an
 inconsistent readiness report fails closed instead of yielding a partial
 selection. A type-filtered selection is safe only for that explicit type.
+
+The read-only `argus document-analysis-input` command and
+`get_document_analysis_input()` service form the next consumption boundary.
+They load one exact `DocumentVersion`, its stable `Document` identity, raw
+artifact digest, authoritative text artifact, readiness report and complete
+safe entity projection inside one database session and one registry-validity
+snapshot. A consumer therefore cannot admit a ready version, then observe a
+different approval state while loading its entities.
+
+The bundle restores the actual immutable artifact chain:
+
+```text
+text artifact
+    -> ENTITY_MENTIONS artifact
+        -> ENTITY_CANDIDATES artifact
+            -> EntityCandidate
+                -> assignment
+                    -> safe Entity
+```
+
+Every link must match by identifier, input content hash, artifact type and
+`DocumentVersion`. Mention spans must reproduce their exact surface text.
+Every selected candidate must descend from one shared text artifact; multiple
+text inputs are rejected as ambiguous instead of being silently combined.
+The bundle is emitted only at strict `ready` coverage and includes every
+resolved entity and occurrence, so no display limit can truncate analytical
+input. It stores no new readiness, projection or bundle row.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication

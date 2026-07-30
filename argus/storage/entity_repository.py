@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from argus.models import (
     AliasDecision,
+    CandidateResolutionDecision,
     Entity,
     EntityCandidate,
     EntityCandidateAssignment,
@@ -30,6 +31,25 @@ class EntityRepository(BaseRepository[Entity]):
             canonical_name=canonical_candidate.canonical_text,
             canonical_entity_candidate_id=canonical_candidate.id,
             created_from_alias_decision_id=creation_decision.id,
+        )
+        self.add(row)
+        self.flush()
+        return row
+
+    def create_from_candidate_resolution(
+            self,
+            *,
+            canonical_candidate: EntityCandidate,
+            creation_decision: CandidateResolutionDecision,
+    ) -> Entity:
+        row = Entity(
+            entity_type=canonical_candidate.entity_type,
+            canonical_name=canonical_candidate.canonical_text,
+            canonical_entity_candidate_id=canonical_candidate.id,
+            created_from_alias_decision_id=None,
+            created_from_candidate_resolution_decision_id=(
+                creation_decision.id
+            ),
         )
         self.add(row)
         self.flush()
@@ -84,6 +104,34 @@ class EntityCandidateAssignmentRepository(
             entity_id=entity.id,
             entity_candidate_id=candidate.id,
             assigned_by_alias_decision_id=decision.id,
+            assigned_by_candidate_resolution_decision_id=None,
+        )
+        self.add(row)
+        self.flush()
+        return row
+
+    def assign_from_candidate_resolution(
+            self,
+            *,
+            entity: Entity,
+            candidate: EntityCandidate,
+            decision: CandidateResolutionDecision,
+    ) -> EntityCandidateAssignment:
+        existing = self.get_for_candidates([candidate.id]).get(
+            candidate.id
+        )
+        if existing is not None:
+            if existing.entity_id != entity.id:
+                raise ValueError(
+                    "Entity candidate is already assigned to another entity."
+                )
+            return existing
+
+        row = EntityCandidateAssignment(
+            entity_id=entity.id,
+            entity_candidate_id=candidate.id,
+            assigned_by_alias_decision_id=None,
+            assigned_by_candidate_resolution_decision_id=decision.id,
         )
         self.add(row)
         self.flush()

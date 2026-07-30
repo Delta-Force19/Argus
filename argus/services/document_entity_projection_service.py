@@ -15,11 +15,17 @@ from argus.models import (
     EntityMention,
 )
 from argus.services.entity_registry_audit_service import (
+    CandidateResolutionAuditItem,
     EntityRegistryAuditItem,
+    EntityRegistryValiditySnapshot,
     EntityResolutionValidity,
     evaluate_entity_registry_validity,
 )
+from argus.services.entity_candidate_provenance_service import (
+    resolve_entity_candidate_provenance,
+)
 from argus.services.safe_entity_projection_service import (
+    ActiveCandidateResolution,
     ActiveEntityResolution,
 )
 
@@ -37,7 +43,8 @@ class ResolvedEntityOccurrence:
     source_label: str
     start_char: int
     end_char: int
-    assigned_by_alias_decision_id: int
+    assigned_by_alias_decision_id: int | None
+    assigned_by_candidate_resolution_decision_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +57,10 @@ class DocumentResolvedEntity:
     canonical_entity_candidate_id: int
     occurrences: tuple[ResolvedEntityOccurrence, ...]
     active_resolutions: tuple[ActiveEntityResolution, ...]
+    active_candidate_resolutions: tuple[
+        ActiveCandidateResolution,
+        ...,
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,31 +111,61 @@ def get_document_entity_projection(
             )
 
         snapshot = evaluate_entity_registry_validity(session)
-        rows = _load_occurrence_rows(
+        projection = project_document_entities(
             session,
-            document_version_id=document_version_id,
-            safe_entity_ids=snapshot.safe_entity_ids,
+            document_version=document_version,
+            validity=snapshot,
+            limit=limit,
             entity_type=entity_type,
         )
-        grouped = _group_occurrences(
-            rows,
-            document_version_id=document_version_id,
+
+    return projection
+
+
+def project_document_entities(
+        session: Session,
+        *,
+        document_version: DocumentVersion,
+        validity: EntityRegistryValiditySnapshot,
+        limit: int | None,
+        entity_type: EntityType | None,
+) -> DocumentEntityProjection:
+    """Project one version against a caller-owned registry snapshot."""
+
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be greater than zero.")
+
+    rows = _load_occurrence_rows(
+        session,
+        document_version_id=document_version.id,
+        safe_entity_ids=validity.safe_entity_ids,
+        entity_type=entity_type,
+    )
+    grouped = _group_occurrences(
+        session,
+        rows,
+        document_version_id=document_version.id,
+    )
+    active_resolutions = _active_resolutions_by_entity(validity.items)
+    active_candidate_resolutions = (
+        _active_candidate_resolutions_by_entity(
+            validity.candidate_items
         )
-        active_resolutions = _active_resolutions_by_entity(
-            snapshot.items
+    )
+    entity_ids = tuple(sorted(grouped))
+    selected_entity_ids = (
+        entity_ids if limit is None else entity_ids[:limit]
+    )
+    items = tuple(
+        _project_entity(
+            grouped[entity_id],
+            active_resolutions=active_resolutions.get(entity_id, ()),
+            active_candidate_resolutions=(
+                active_candidate_resolutions.get(entity_id, ())
+            ),
         )
-        entity_ids = tuple(sorted(grouped))
-        selected_entity_ids = entity_ids[:limit]
-        items = tuple(
-            _project_entity(
-                grouped[entity_id],
-                active_resolutions=active_resolutions.get(
-                    entity_id,
-                    (),
-                ),
-            )
-            for entity_id in selected_entity_ids
-        )
+        for entity_id in selected_entity_ids
+    )
 
     return DocumentEntityProjection(
         document_version_id=document_version.id,
@@ -200,6 +241,7 @@ def _load_occurrence_rows(
 
 
 def _group_occurrences(
+        session: Session,
         rows: tuple[_OccurrenceRow, ...],
         *,
         document_version_id: int,
@@ -207,6 +249,7 @@ def _group_occurrences(
     grouped: dict[int, list[_OccurrenceRow]] = defaultdict(list)
     for row in rows:
         _validate_occurrence(
+            session,
             row,
             document_version_id=document_version_id,
         )
@@ -218,6 +261,7 @@ def _group_occurrences(
 
 
 def _validate_occurrence(
+        session: Session,
         row: _OccurrenceRow,
         *,
         document_version_id: int,
@@ -230,13 +274,14 @@ def _validate_occurrence(
         raise ValueError(
             "Resolved mention belongs to another document version."
         )
-    if (
-        row.candidate.derived_artifact_id
-        != row.mention.derived_artifact_id
-    ):
-        raise ValueError(
-            "Resolved candidate and mention use different artifacts."
-        )
+    _, issue = resolve_entity_candidate_provenance(
+        session,
+        candidate=row.candidate,
+        mention=row.mention,
+        document_version_id=document_version_id,
+    )
+    if issue is not None:
+        raise ValueError(f"Resolved candidate provenance is invalid: {issue}")
     if row.candidate.entity_type is not row.entity.entity_type:
         raise ValueError(
             "Resolved candidate type does not match the entity."
@@ -273,16 +318,47 @@ def _active_resolutions_by_entity(
     }
 
 
+def _active_candidate_resolutions_by_entity(
+        items: tuple[CandidateResolutionAuditItem, ...],
+) -> dict[int, tuple[ActiveCandidateResolution, ...]]:
+    grouped: dict[int, list[ActiveCandidateResolution]] = defaultdict(list)
+    for item in items:
+        if not item.safe_for_downstream_use:
+            continue
+        if item.validity is not EntityResolutionValidity.ACTIVE:
+            raise ValueError(
+                "Safe document candidate resolution is not active."
+            )
+        grouped[item.entity_id].append(
+            ActiveCandidateResolution(
+                seed_candidate_id=item.seed_candidate_id,
+                scope=item.scope.value,
+                latest_candidate_resolution_decision_id=(
+                    item.latest_decision_id
+                ),
+                latest_revision=item.latest_revision,
+            )
+        )
+    return {
+        entity_id: tuple(resolutions)
+        for entity_id, resolutions in grouped.items()
+    }
+
+
 def _project_entity(
         rows: tuple[_OccurrenceRow, ...],
         *,
         active_resolutions: tuple[ActiveEntityResolution, ...],
+        active_candidate_resolutions: tuple[
+            ActiveCandidateResolution,
+            ...,
+        ],
 ) -> DocumentResolvedEntity:
     if not rows:
         raise ValueError(
             "Document entity projection requires an occurrence."
         )
-    if not active_resolutions:
+    if not (active_resolutions or active_candidate_resolutions):
         raise ValueError(
             "Document entity projection is missing active evidence."
         )
@@ -314,8 +390,13 @@ def _project_entity(
                 assigned_by_alias_decision_id=(
                     row.assignment.assigned_by_alias_decision_id
                 ),
+                assigned_by_candidate_resolution_decision_id=(
+                    row.assignment
+                    .assigned_by_candidate_resolution_decision_id
+                ),
             )
             for row in rows
         ),
         active_resolutions=active_resolutions,
+        active_candidate_resolutions=active_candidate_resolutions,
     )

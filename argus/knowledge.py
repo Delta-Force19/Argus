@@ -50,6 +50,55 @@ class AliasDecisionStatus(str, Enum):
     NEEDS_REVIEW = "needs_review"
 
 
+class CandidateResolutionStatus(str, Enum):
+    """Human outcome for one candidate-identity resolution."""
+
+    ASSIGNED = "assigned"
+    REVOKED = "revoked"
+
+
+class CandidateResolutionScope(str, Enum):
+    """Explicit set of candidates covered by one resolution."""
+
+    SINGLE = "single"
+    EXACT_CANONICAL = "exact_canonical"
+
+
+@dataclass(frozen=True, slots=True)
+class ManualCandidateResolutionDecision:
+    """Append-only human judgment for one candidate identity."""
+
+    status: CandidateResolutionStatus
+    scope: CandidateResolutionScope
+    reason: str
+    reviewer: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, CandidateResolutionStatus):
+            raise ValueError(
+                "Candidate resolution status must be a "
+                "CandidateResolutionStatus."
+            )
+        if not isinstance(self.scope, CandidateResolutionScope):
+            raise ValueError(
+                "Candidate resolution scope must be a "
+                "CandidateResolutionScope."
+            )
+        if not self.reason.strip():
+            raise ValueError(
+                "Candidate resolution reason must not be blank."
+            )
+        if not self.reviewer.strip():
+            raise ValueError(
+                "Candidate resolution reviewer must not be blank."
+            )
+        if len(self.reviewer.strip()) > 200:
+            raise ValueError(
+                "Candidate resolution reviewer must not exceed "
+                "200 characters."
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ManualAliasDecision:
     """Append-only human judgment supplied to the decision service."""
