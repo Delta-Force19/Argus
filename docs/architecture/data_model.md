@@ -899,3 +899,27 @@ Argus must be able to represent:
 - method-dependent.
 
 A missing answer is preferable to unsupported certainty.
+
+### Document entity readiness
+
+Entity-dependent downstream analysis must cross an explicit readiness
+boundary for the exact immutable `DocumentVersion`. Readiness is a derived
+read-only contract over complete candidate coverage; it is not persisted as a
+second source of truth.
+
+```text
+DocumentVersion
+    entity readiness
+        ready
+        no_candidates
+        incomplete
+        blocked
+        invalid
+```
+
+`ready` requires one or more candidates and exact 100% `safe_resolved`
+coverage. The remaining states are not percentages or confidence bands:
+they are explicit reasons that downstream consumption is unsafe. Provenance
+damage outranks a blocked registry identity, which outranks an unassigned
+candidate. A type-filtered contract applies only to that entity type and must
+carry the filter in its detached result.

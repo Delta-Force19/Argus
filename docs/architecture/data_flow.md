@@ -590,6 +590,30 @@ explicit provenance issue. This distinction prevents downstream analysis from
 interpreting an empty safe projection as evidence that the document contains
 no entity mentions.
 
+The read-only `argus document-entity-readiness` command,
+`get_document_entity_readiness()` service and
+`require_document_entity_readiness()` guard turn those complete coverage
+counts into an enforceable document-level contract. The contract has no score
+or configurable completeness threshold. A document version is `ready` only
+when it has at least one entity candidate and every candidate is
+`safe_resolved`.
+
+All other states fail closed:
+
+- `no_candidates`: the coverage layer cannot establish whether the document
+  legitimately contains no entities or the upstream entity path is absent;
+- `incomplete`: at least one candidate remains unassigned;
+- `blocked`: at least one assignment points to an entity whose registry
+  validity is not fully active;
+- `invalid`: at least one candidate has structurally inconsistent provenance.
+
+When several problems coexist, the deterministic precedence is `invalid`,
+`blocked`, then `incomplete`. The report retains the complete counts for every
+coverage state, and `require_document_entity_readiness()` raises instead of
+allowing a non-ready version into an entity-dependent analytical stage. An
+optional entity-type filter creates an explicitly typed readiness contract;
+it must not be confused with readiness of the complete document.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

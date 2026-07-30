@@ -64,6 +64,9 @@ from argus.services.document_entity_projection_service import (
 from argus.services.document_entity_coverage_service import (
     get_document_entity_coverage,
 )
+from argus.services.document_entity_readiness_service import (
+    get_document_entity_readiness,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus, EntityType
@@ -936,6 +939,41 @@ def document_entity_coverage(
             f"canonical={item.canonical_text!r} "
             f"provenance_issue={item.provenance_issue!r}"
         )
+
+
+@app.command()
+def document_entity_readiness(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose entity readiness is checked.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type filter applied before readiness.",
+        ),
+) -> None:
+    """Check whether entity resolution is safe for downstream use."""
+
+    report = get_document_entity_readiness(
+        document_version_id=document_version_id,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"document_id={report.document_id} "
+        f"version={report.version_number} "
+        f"type={report.entity_type.value if report.entity_type else 'all'} "
+        f"status={report.status.value} "
+        f"ready={str(report.ready_for_downstream_use).lower()} "
+        f"candidates={report.candidate_count} "
+        f"safe_resolved={report.safe_resolved_count} "
+        f"unassigned={report.unassigned_count} "
+        f"blocked={report.blocked_count} "
+        f"invalid_provenance={report.invalid_provenance_count}"
+    )
 
 
 @app.command()

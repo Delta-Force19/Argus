@@ -83,6 +83,10 @@ from argus.services.document_entity_coverage_service import (
     DocumentEntityCoverageReport,
     DocumentEntityCoverageStatus,
 )
+from argus.services.document_entity_readiness_service import (
+    DocumentEntityReadinessReport,
+    DocumentEntityReadinessStatus,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -101,6 +105,51 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.get_document_entity_readiness")
+    def test_document_entity_readiness_prints_enforceable_contract(
+            self,
+            get_document_entity_readiness,
+    ) -> None:
+        get_document_entity_readiness.return_value = (
+            DocumentEntityReadinessReport(
+                document_version_id=21,
+                document_id=20,
+                version_number=2,
+                entity_type=EntityType.ORGANIZATION,
+                status=DocumentEntityReadinessStatus.INCOMPLETE,
+                ready_for_downstream_use=False,
+                candidate_count=3,
+                safe_resolved_count=2,
+                unassigned_count=1,
+                blocked_count=0,
+                invalid_provenance_count=0,
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "document-entity-readiness",
+                "--document-version-id",
+                "21",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_document_entity_readiness.assert_called_once_with(
+            document_version_id=21,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "document_version_id=21 document_id=20 version=2 "
+            "type=organization status=incomplete ready=false "
+            "candidates=3 safe_resolved=2 unassigned=1 blocked=0 "
+            "invalid_provenance=0",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.run_telegram_news_bot")
     @patch("argus.interface.cli.configure_logging")
     @patch("argus.interface.cli.upgrade_database")
