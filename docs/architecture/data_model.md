@@ -923,3 +923,15 @@ they are explicit reasons that downstream consumption is unsafe. Provenance
 damage outranks a blocked registry identity, which outranks an unassigned
 candidate. A type-filtered contract applies only to that entity type and must
 carry the filter in its detached result.
+
+### Corpus entity readiness
+
+`CorpusEntityReadinessReport` is a detached, read-only inventory of the same
+document readiness contract across all persisted document versions. It
+contains complete document and candidate totals, counts for every readiness
+state and a bounded ordered set of document-level reports.
+
+The corpus view does not persist a second readiness state and does not weaken
+the document contract. Registry validity is evaluated once for the batch.
+Versions without candidates remain visible as `no_candidates`. A status filter
+and display limit affect only detailed rows, never complete corpus counts.

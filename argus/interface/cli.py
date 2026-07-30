@@ -65,7 +65,11 @@ from argus.services.document_entity_coverage_service import (
     get_document_entity_coverage,
 )
 from argus.services.document_entity_readiness_service import (
+    DocumentEntityReadinessStatus,
     get_document_entity_readiness,
+)
+from argus.services.corpus_entity_readiness_service import (
+    get_corpus_entity_readiness,
 )
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
@@ -974,6 +978,66 @@ def document_entity_readiness(
         f"blocked={report.blocked_count} "
         f"invalid_provenance={report.invalid_provenance_count}"
     )
+
+
+@app.command()
+def corpus_entity_readiness(
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of matching document versions to show.",
+        ),
+        status: DocumentEntityReadinessStatus | None = typer.Option(
+            None,
+            "--status",
+            help="Optional readiness status filter for detailed rows.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type filter applied before readiness.",
+        ),
+) -> None:
+    """Audit entity readiness across every document version."""
+
+    report = get_corpus_entity_readiness(
+        limit=limit,
+        status=status,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"document_versions={report.document_version_count} "
+        f"ready={report.ready_document_version_count} "
+        f"unsafe={report.unsafe_document_version_count} "
+        f"matched={report.matched_document_version_count} "
+        f"shown={len(report.items)} "
+        f"type={report.entity_type.value if report.entity_type else 'all'}"
+    )
+    typer.echo(
+        f"candidates={report.candidate_count} "
+        f"safe_resolved={report.safe_resolved_count} "
+        f"unassigned={report.unassigned_count} "
+        f"blocked={report.blocked_count} "
+        f"invalid_provenance={report.invalid_provenance_count}"
+    )
+    for count in report.counts_by_status:
+        typer.echo(
+            f"readiness={count.status.value} "
+            f"document_versions={count.count}"
+        )
+    for item in report.items:
+        typer.echo(
+            f"document document_version_id={item.document_version_id} "
+            f"document_id={item.document_id} "
+            f"version={item.version_number} "
+            f"status={item.status.value} "
+            f"ready={str(item.ready_for_downstream_use).lower()} "
+            f"candidates={item.candidate_count} "
+            f"safe_resolved={item.safe_resolved_count} "
+            f"unassigned={item.unassigned_count} "
+            f"blocked={item.blocked_count} "
+            f"invalid_provenance={item.invalid_provenance_count}"
+        )
 
 
 @app.command()

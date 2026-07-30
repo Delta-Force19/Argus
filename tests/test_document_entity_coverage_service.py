@@ -22,6 +22,7 @@ from argus.services.alias_decision_service import AliasDecisionService
 from argus.services.document_entity_coverage_service import (
     DocumentEntityCoverageStatus,
     get_document_entity_coverage,
+    get_document_entity_coverage_batch,
 )
 from argus.services.entity_resolution_service import (
     EntityResolutionService,
@@ -220,6 +221,34 @@ class DocumentEntityCoverageServiceTests(unittest.TestCase):
         self.session.close()
         self.assertEqual(report.items[0].surface_text, "UN")
         self.session = self.session_factory()
+
+    def test_batch_uses_one_snapshot_and_includes_empty_versions(
+            self,
+    ) -> None:
+        empty = self._document_version(
+            document_id=2,
+            raw_artifact_id=2,
+        )
+        self.session.commit()
+
+        reports = get_document_entity_coverage_batch(
+            session_factory=self.session_factory,
+        )
+
+        self.assertEqual(
+            tuple(item.document_version_id for item in reports),
+            (self.document_version.id, empty.id),
+        )
+        self.assertEqual(reports[0].candidate_count, 3)
+        self.assertEqual(reports[1].candidate_count, 0)
+        self.assertEqual(reports[1].items, ())
+
+    def test_batch_rejects_invalid_item_limit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "item_limit"):
+            get_document_entity_coverage_batch(
+                item_limit=0,
+                session_factory=self.session_factory,
+            )
 
     @staticmethod
     def _counts(report) -> dict[

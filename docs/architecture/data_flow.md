@@ -614,6 +614,20 @@ allowing a non-ready version into an entity-dependent analytical stage. An
 optional entity-type filter creates an explicitly typed readiness contract;
 it must not be confused with readiness of the complete document.
 
+The read-only `argus corpus-entity-readiness` command and
+`get_corpus_entity_readiness()` service apply the same contract to every
+persisted `DocumentVersion`. The batch path evaluates registry validity once
+and keeps all document coverage checks inside one database session, so one
+corpus report cannot mix different registry revisions. It includes versions
+with no candidates rather than silently dropping them.
+
+Corpus totals and readiness-state counts are always complete. `--limit`
+bounds only the detailed document rows, and `--status` filters only those
+rows; neither option changes the totals. This allows operators to locate
+ready, incomplete, blocked or invalid versions without mistaking a filtered
+terminal view for corpus coverage. The optional entity-type filter is applied
+before candidate classification and is carried by the report.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

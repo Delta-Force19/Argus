@@ -17,6 +17,7 @@ from argus.models import (
 )
 from argus.services.entity_registry_audit_service import (
     EntityRegistryAuditItem,
+    EntityRegistryValiditySnapshot,
     EntityResolutionValidity,
     evaluate_entity_registry_validity,
 )
@@ -108,25 +109,74 @@ def get_document_entity_coverage(
             )
 
         validity = evaluate_entity_registry_validity(session)
-        blocking_by_entity = _blocking_validities_by_entity(
-            validity.items
-        )
-        rows = _load_rows(
+        report = _build_report(
             session,
-            document_version_id=document_version_id,
+            document_version=document_version,
+            validity=validity,
+            limit=limit,
             entity_type=entity_type,
         )
-        items = tuple(
-            _classify_row(
-                row,
-                document_version_id=document_version_id,
-                safe_entity_ids=validity.safe_entity_ids,
-                blocked_entity_ids=validity.blocked_entity_ids,
-                blocking_by_entity=blocking_by_entity,
-            )
-            for row in rows
+
+    return report
+
+
+def get_document_entity_coverage_batch(
+        *,
+        item_limit: int = 1,
+        entity_type: EntityType | None = None,
+        session_factory: Callable[[], Session] = SessionLocal,
+) -> tuple[DocumentEntityCoverageReport, ...]:
+    """Evaluate all document versions against one registry snapshot."""
+
+    if item_limit < 1:
+        raise ValueError("item_limit must be greater than zero.")
+
+    with session_factory() as session:
+        document_versions = tuple(
+            session.scalars(
+                select(DocumentVersion).order_by(
+                    DocumentVersion.id.asc()
+                )
+            ).all()
         )
-        counts = Counter(item.status for item in items)
+        validity = evaluate_entity_registry_validity(session)
+        return tuple(
+            _build_report(
+                session,
+                document_version=document_version,
+                validity=validity,
+                limit=item_limit,
+                entity_type=entity_type,
+            )
+            for document_version in document_versions
+        )
+
+
+def _build_report(
+        session: Session,
+        *,
+        document_version: DocumentVersion,
+        validity: EntityRegistryValiditySnapshot,
+        limit: int,
+        entity_type: EntityType | None,
+) -> DocumentEntityCoverageReport:
+    blocking_by_entity = _blocking_validities_by_entity(validity.items)
+    rows = _load_rows(
+        session,
+        document_version_id=document_version.id,
+        entity_type=entity_type,
+    )
+    items = tuple(
+        _classify_row(
+            row,
+            document_version_id=document_version.id,
+            safe_entity_ids=validity.safe_entity_ids,
+            blocked_entity_ids=validity.blocked_entity_ids,
+            blocking_by_entity=blocking_by_entity,
+        )
+        for row in rows
+    )
+    counts = Counter(item.status for item in items)
 
     return DocumentEntityCoverageReport(
         document_version_id=document_version.id,

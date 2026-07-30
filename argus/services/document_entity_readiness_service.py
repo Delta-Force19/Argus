@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from argus.database import SessionLocal
 from argus.knowledge import EntityType
 from argus.services.document_entity_coverage_service import (
+    DocumentEntityCoverageReport,
     DocumentEntityCoverageStatus,
     get_document_entity_coverage,
 )
@@ -53,6 +54,19 @@ def get_document_entity_readiness(
         entity_type=entity_type,
         session_factory=session_factory,
     )
+    return evaluate_document_entity_readiness(
+        coverage,
+        entity_type=entity_type,
+    )
+
+
+def evaluate_document_entity_readiness(
+        coverage: DocumentEntityCoverageReport,
+        *,
+        entity_type: EntityType | None = None,
+) -> DocumentEntityReadinessReport:
+    """Convert complete candidate coverage into a readiness contract."""
+
     counts = {
         item.status: item.count
         for item in coverage.counts_by_status

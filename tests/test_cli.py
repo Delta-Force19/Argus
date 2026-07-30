@@ -87,6 +87,10 @@ from argus.services.document_entity_readiness_service import (
     DocumentEntityReadinessReport,
     DocumentEntityReadinessStatus,
 )
+from argus.services.corpus_entity_readiness_service import (
+    CorpusEntityReadinessCount,
+    CorpusEntityReadinessReport,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -105,6 +109,82 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.get_corpus_entity_readiness")
+    def test_corpus_entity_readiness_prints_complete_summary(
+            self,
+            get_corpus_entity_readiness,
+    ) -> None:
+        item = DocumentEntityReadinessReport(
+            document_version_id=21,
+            document_id=20,
+            version_number=2,
+            entity_type=EntityType.ORGANIZATION,
+            status=DocumentEntityReadinessStatus.INCOMPLETE,
+            ready_for_downstream_use=False,
+            candidate_count=3,
+            safe_resolved_count=2,
+            unassigned_count=1,
+            blocked_count=0,
+            invalid_provenance_count=0,
+        )
+        get_corpus_entity_readiness.return_value = (
+            CorpusEntityReadinessReport(
+                entity_type=EntityType.ORGANIZATION,
+                document_version_count=4,
+                ready_document_version_count=1,
+                unsafe_document_version_count=3,
+                matched_document_version_count=2,
+                candidate_count=9,
+                safe_resolved_count=5,
+                unassigned_count=2,
+                blocked_count=1,
+                invalid_provenance_count=1,
+                counts_by_status=tuple(
+                    CorpusEntityReadinessCount(
+                        status=status,
+                        count=1 if status.value != "no_candidates" else 0,
+                    )
+                    for status in DocumentEntityReadinessStatus
+                ),
+                items=(item,),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "corpus-entity-readiness",
+                "--limit",
+                "1",
+                "--status",
+                "incomplete",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_corpus_entity_readiness.assert_called_once_with(
+            limit=1,
+            status=DocumentEntityReadinessStatus.INCOMPLETE,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "document_versions=4 ready=1 unsafe=3 matched=2 shown=1 "
+            "type=organization",
+            result.stdout,
+        )
+        self.assertIn(
+            "candidates=9 safe_resolved=5 unassigned=2 blocked=1 "
+            "invalid_provenance=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "document document_version_id=21 document_id=20 version=2 "
+            "status=incomplete ready=false candidates=3",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.get_document_entity_readiness")
     def test_document_entity_readiness_prints_enforceable_contract(
             self,
