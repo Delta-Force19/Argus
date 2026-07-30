@@ -72,6 +72,11 @@ from argus.services.safe_entity_projection_service import (
     SafeEntityCandidate,
     SafeEntityProjection,
 )
+from argus.services.document_entity_projection_service import (
+    DocumentEntityProjection,
+    DocumentResolvedEntity,
+    ResolvedEntityOccurrence,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -1152,6 +1157,96 @@ class CLITests(unittest.TestCase):
             "canonical_name='united nations' "
             "canonical_candidate_id=12 "
             "candidate_ids=11,12 active_decision_ids=52",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_document_entity_projection")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_document_entities_prints_safe_occurrence_provenance(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_document_entity_projection,
+    ) -> None:
+        get_document_entity_projection.return_value = (
+            DocumentEntityProjection(
+                document_version_id=21,
+                document_id=20,
+                version_number=2,
+                resolved_entity_count=1,
+                resolved_occurrence_count=1,
+                items=(
+                    DocumentResolvedEntity(
+                        entity_id=61,
+                        entity_type=EntityType.ORGANIZATION,
+                        canonical_name="united nations",
+                        canonical_entity_candidate_id=12,
+                        occurrences=(
+                            ResolvedEntityOccurrence(
+                                entity_candidate_id=11,
+                                entity_mention_id=41,
+                                derived_artifact_id=31,
+                                canonical_text="un",
+                                surface_text="UN",
+                                normalized_text="un",
+                                source_label="ORG",
+                                start_char=5,
+                                end_char=7,
+                                assigned_by_alias_decision_id=52,
+                            ),
+                        ),
+                        active_resolutions=(
+                            ActiveEntityResolution(
+                                proposal_id=41,
+                                left_candidate_id=11,
+                                right_candidate_id=12,
+                                latest_alias_decision_id=52,
+                                latest_revision=1,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "document-entities",
+                "--document-version-id",
+                "21",
+                "--limit",
+                "25",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_document_entity_projection.assert_called_once_with(
+            document_version_id=21,
+            limit=25,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "document_version_id=21 document_id=20 version=2 "
+            "resolved_entities=1 resolved_occurrences=1 shown=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "entity_id=61 type=organization "
+            "canonical_name='united nations' "
+            "canonical_candidate_id=12 occurrences=1 "
+            "active_decision_ids=52",
+            result.stdout,
+        )
+        self.assertIn(
+            "entity_candidate_id=11 entity_mention_id=41 "
+            "derived_artifact_id=31 span=5:7 surface='UN' "
+            "canonical='un' assignment_decision_id=52",
             result.stdout,
         )
 

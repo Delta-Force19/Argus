@@ -345,6 +345,27 @@ reporting and downstream selection share one validity evaluator, preventing a
 consumer-facing query from drifting away from the documented review semantics.
 Entities with missing reconstructable evidence are unsafe by default.
 
+The document-centric entity projection applies this same computed boundary to
+one immutable `DocumentVersion`. It exposes only safe entities that have
+assigned candidate observations in that exact version. Each projected
+occurrence preserves:
+
+- the exact `EntityCandidate`, `EntityMention` and derived artifact;
+- surface, normalized and candidate-canonical text;
+- source label and start-inclusive/end-exclusive character offsets;
+- the exact decision that assigned the candidate;
+- the active approval revisions supporting the containing entity.
+
+The entity remains the unit of safety: one invalid registry link suppresses
+all of that entity's occurrences in every document projection. The
+document-version filter does not weaken or locally reinterpret registry
+validity. Conversely, candidate observations assigned to the entity in other
+versions are not returned as if they occurred in the requested document.
+
+This projection is derived at read time, ordered deterministically and stores
+no document/entity join table. Missing document versions and inconsistent
+candidate, mention, artifact, version or type provenance fail explicitly.
+
 ---
 
 ### Statement

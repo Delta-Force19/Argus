@@ -547,6 +547,28 @@ consume this projection rather than query `entities` or
 `entity_candidate_assignments` directly whenever resolved identity is being
 treated as settled.
 
+The `argus document-entities` entrypoint and
+`get_document_entity_projection()` service apply the same safety boundary to
+one exact `DocumentVersion`. They select only candidate assignments belonging
+to entities that are safe in the complete registry snapshot, then expose the
+mentions actually observed in the requested version. A blocked entity is
+omitted from the document atomically even when one of its individual
+occurrences was assigned by an approval that remains active.
+
+Every returned document occurrence retains the candidate, mention, derived
+artifact, source label, exact character span, surface and normalized text, and
+the decision that assigned the candidate. The containing entity also retains
+all of its currently active proposal revisions. Occurrences from other
+document versions are never included, although an active resolution elsewhere
+remains visible as identity provenance.
+
+The document projection is read-only, ordered by persistent entity identifier
+and source-text span, and bounded by entity count rather than occurrence
+count. It rejects an unknown document version and fails closed when candidate,
+mention, artifact, document-version or entity-type provenance is inconsistent.
+Analytical stages that start from a document should consume this projection
+instead of joining candidate assignments directly.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

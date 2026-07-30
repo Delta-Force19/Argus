@@ -58,6 +58,9 @@ from argus.services.entity_registry_audit_service import (
 from argus.services.safe_entity_projection_service import (
     get_safe_entity_projection,
 )
+from argus.services.document_entity_projection_service import (
+    get_document_entity_projection,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus, EntityType
@@ -804,6 +807,68 @@ def safe_entities(
             f"candidate_ids={candidate_ids} "
             f"active_decision_ids={decision_ids}"
         )
+
+
+@app.command()
+def document_entities(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose resolved entities are shown.",
+        ),
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of resolved entities to show.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type filter.",
+        ),
+) -> None:
+    """Expose safe resolved identities observed in one document version."""
+
+    projection = get_document_entity_projection(
+        document_version_id=document_version_id,
+        limit=limit,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"document_version_id={projection.document_version_id} "
+        f"document_id={projection.document_id} "
+        f"version={projection.version_number} "
+        f"resolved_entities={projection.resolved_entity_count} "
+        f"resolved_occurrences={projection.resolved_occurrence_count} "
+        f"shown={len(projection.items)}"
+    )
+    for entity in projection.items:
+        decision_ids = ",".join(
+            str(link.latest_alias_decision_id)
+            for link in entity.active_resolutions
+        )
+        typer.echo(
+            f"entity entity_id={entity.entity_id} "
+            f"type={entity.entity_type.value} "
+            f"canonical_name={entity.canonical_name!r} "
+            f"canonical_candidate_id="
+            f"{entity.canonical_entity_candidate_id} "
+            f"occurrences={len(entity.occurrences)} "
+            f"active_decision_ids={decision_ids}"
+        )
+        for occurrence in entity.occurrences:
+            typer.echo(
+                f"occurrence entity_candidate_id="
+                f"{occurrence.entity_candidate_id} "
+                f"entity_mention_id={occurrence.entity_mention_id} "
+                f"derived_artifact_id={occurrence.derived_artifact_id} "
+                f"span={occurrence.start_char}:{occurrence.end_char} "
+                f"surface={occurrence.surface_text!r} "
+                f"canonical={occurrence.canonical_text!r} "
+                f"assignment_decision_id="
+                f"{occurrence.assigned_by_alias_decision_id}"
+            )
 
 
 @app.command()
