@@ -71,6 +71,9 @@ from argus.services.document_entity_readiness_service import (
 from argus.services.corpus_entity_readiness_service import (
     get_corpus_entity_readiness,
 )
+from argus.services.ready_document_selector_service import (
+    select_ready_document_versions,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus, EntityType
@@ -1037,6 +1040,42 @@ def corpus_entity_readiness(
             f"unassigned={item.unassigned_count} "
             f"blocked={item.blocked_count} "
             f"invalid_provenance={item.invalid_provenance_count}"
+        )
+
+
+@app.command()
+def ready_document_versions(
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of downstream-safe versions to select.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type readiness boundary.",
+        ),
+) -> None:
+    """Select only document versions safe for entity-dependent analysis."""
+
+    selection = select_ready_document_versions(
+        limit=limit,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"ready_document_versions="
+        f"{selection.ready_document_version_count} "
+        f"selected={selection.selected_document_version_count} "
+        f"type="
+        f"{selection.entity_type.value if selection.entity_type else 'all'}"
+    )
+    for item in selection.items:
+        typer.echo(
+            f"document document_version_id={item.document_version_id} "
+            f"document_id={item.document_id} "
+            f"version={item.version_number} "
+            f"candidates={item.candidate_count} "
+            f"safe_resolved={item.safe_resolved_count}"
         )
 
 

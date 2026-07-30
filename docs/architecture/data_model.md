@@ -935,3 +935,17 @@ The corpus view does not persist a second readiness state and does not weaken
 the document contract. Registry validity is evaluated once for the batch.
 Versions without candidates remain visible as `no_candidates`. A status filter
 and display limit affect only detailed rows, never complete corpus counts.
+
+### Ready document selection
+
+`ReadyDocumentSelection` is the narrow admission DTO for entity-dependent
+downstream work. Its items contain only immutable document-version identifiers
+and exact safe candidate counts taken from `ready` corpus reports. Unsafe
+states have no representation in `ReadyDocumentVersion`.
+
+The selector preserves the complete ready-document count while bounding the
+returned items. It verifies the readiness flag, status, type boundary and
+candidate counts again when constructing each item, so an inconsistent
+upstream report is rejected rather than partially consumed. No selection is
+persisted; the entity registry and candidate provenance remain the source of
+truth.

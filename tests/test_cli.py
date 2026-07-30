@@ -91,6 +91,10 @@ from argus.services.corpus_entity_readiness_service import (
     CorpusEntityReadinessCount,
     CorpusEntityReadinessReport,
 )
+from argus.services.ready_document_selector_service import (
+    ReadyDocumentSelection,
+    ReadyDocumentVersion,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -109,6 +113,56 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.select_ready_document_versions")
+    def test_ready_document_versions_prints_safe_selection(
+            self,
+            select_ready_document_versions,
+    ) -> None:
+        select_ready_document_versions.return_value = (
+            ReadyDocumentSelection(
+                entity_type=EntityType.ORGANIZATION,
+                ready_document_version_count=3,
+                selected_document_version_count=1,
+                items=(
+                    ReadyDocumentVersion(
+                        document_version_id=21,
+                        document_id=20,
+                        version_number=2,
+                        entity_type=EntityType.ORGANIZATION,
+                        candidate_count=3,
+                        safe_resolved_count=3,
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "ready-document-versions",
+                "--limit",
+                "1",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        select_ready_document_versions.assert_called_once_with(
+            limit=1,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "ready_document_versions=3 selected=1 "
+            "type=organization",
+            result.stdout,
+        )
+        self.assertIn(
+            "document document_version_id=21 document_id=20 version=2 "
+            "candidates=3 safe_resolved=3",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.get_corpus_entity_readiness")
     def test_corpus_entity_readiness_prints_complete_summary(
             self,

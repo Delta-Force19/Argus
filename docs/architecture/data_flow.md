@@ -628,6 +628,14 @@ ready, incomplete, blocked or invalid versions without mistaking a filtered
 terminal view for corpus coverage. The optional entity-type filter is applied
 before candidate classification and is carried by the report.
 
+The read-only `argus ready-document-versions` entrypoint and
+`select_ready_document_versions()` service form the downstream admission
+boundary. They expose only detached document-version DTOs whose corpus report
+is exactly `ready`; no unsafe status is represented in the result type.
+The complete ready count remains independent of the selection limit, and an
+inconsistent readiness report fails closed instead of yielding a partial
+selection. A type-filtered selection is safe only for that explicit type.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and
