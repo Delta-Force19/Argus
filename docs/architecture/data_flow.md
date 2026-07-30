@@ -569,6 +569,27 @@ mention, artifact, document-version or entity-type provenance is inconsistent.
 Analytical stages that start from a document should consume this projection
 instead of joining candidate assignments directly.
 
+The read-only `argus document-entity-coverage` command and
+`get_document_entity_coverage()` service complement that positive projection.
+For one exact `DocumentVersion`, every entity candidate is classified exactly
+once as:
+
+- `safe_resolved` when it is assigned to an entity that passes the complete
+  registry validity boundary;
+- `unassigned` when no registry assignment exists;
+- `blocked` when an assignment exists but any registry link for that entity is
+  no longer active;
+- `invalid_provenance` when the candidate, mention, assignment and entity chain
+  is structurally inconsistent.
+
+The audit reports complete counts before applying its evidence-row limit, so a
+bounded terminal view cannot be mistaken for complete coverage. An optional
+entity-type filter is applied before both counts and bounding. Blocked rows
+include the current registry validity states, while invalid rows include an
+explicit provenance issue. This distinction prevents downstream analysis from
+interpreting an empty safe projection as evidence that the document contains
+no entity mentions.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

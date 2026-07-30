@@ -366,6 +366,24 @@ This projection is derived at read time, ordered deterministically and stores
 no document/entity join table. Missing document versions and inconsistent
 candidate, mention, artifact, version or type provenance fail explicitly.
 
+The document entity coverage audit is the negative-space companion to that
+projection. It reads all `EntityCandidate` rows for one exact
+`DocumentVersion` and assigns each candidate one mutually exclusive state:
+`safe_resolved`, `unassigned`, `blocked`, or `invalid_provenance`.
+
+`safe_resolved` uses the same complete registry validity snapshot as the safe
+entity projections. `blocked` means that a candidate assignment exists but the
+entity is unsafe as a whole; the row retains the blocking validity states.
+`unassigned` means no persistent identity has consumed the candidate.
+`invalid_provenance` exposes a mismatch or missing link among the candidate,
+mention, assignment and entity rather than silently dropping it.
+
+Coverage counts are computed after the optional entity-type filter and before
+the output limit. They are therefore suitable for declaring analytical
+limitations: absence from the positive projection can be distinguished from
+absence of extracted candidates. The audit is read-only and introduces no
+stored coverage flag or migration.
+
 ---
 
 ### Statement

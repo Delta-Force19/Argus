@@ -61,6 +61,9 @@ from argus.services.safe_entity_projection_service import (
 from argus.services.document_entity_projection_service import (
     get_document_entity_projection,
 )
+from argus.services.document_entity_coverage_service import (
+    get_document_entity_coverage,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import AliasDecisionStatus, EntityType
@@ -869,6 +872,70 @@ def document_entities(
                 f"assignment_decision_id="
                 f"{occurrence.assigned_by_alias_decision_id}"
             )
+
+
+@app.command()
+def document_entity_coverage(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose entity coverage is audited.",
+        ),
+        limit: int = typer.Option(
+            50,
+            min=1,
+            help="Maximum number of candidate evidence rows to show.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type filter applied before counts.",
+        ),
+) -> None:
+    """Audit candidate resolution coverage in one document version."""
+
+    report = get_document_entity_coverage(
+        document_version_id=document_version_id,
+        limit=limit,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"document_id={report.document_id} "
+        f"version={report.version_number} "
+        f"candidates={report.candidate_count} "
+        f"shown={len(report.items)}"
+    )
+    for count in report.counts_by_status:
+        typer.echo(
+            f"coverage={count.status.value} candidates={count.count}"
+        )
+    for item in report.items:
+        blocking = ",".join(
+            validity.value for validity in item.blocking_validities
+        )
+        span = (
+            "unknown"
+            if item.start_char is None or item.end_char is None
+            else f"{item.start_char}:{item.end_char}"
+        )
+        typer.echo(
+            f"candidate entity_candidate_id="
+            f"{item.entity_candidate_id} "
+            f"entity_mention_id={item.entity_mention_id} "
+            f"derived_artifact_id={item.derived_artifact_id} "
+            f"type={item.entity_type.value} "
+            f"coverage={item.status.value} "
+            f"entity_id={item.entity_id or 'none'} "
+            f"assignment_decision_id="
+            f"{item.assigned_by_alias_decision_id or 'none'} "
+            f"blocking_validities={blocking or 'none'} "
+            f"span={span} "
+            f"surface={item.surface_text!r} "
+            f"canonical={item.canonical_text!r} "
+            f"provenance_issue={item.provenance_issue!r}"
+        )
 
 
 @app.command()

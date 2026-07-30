@@ -77,6 +77,12 @@ from argus.services.document_entity_projection_service import (
     DocumentResolvedEntity,
     ResolvedEntityOccurrence,
 )
+from argus.services.document_entity_coverage_service import (
+    DocumentEntityCoverageCount,
+    DocumentEntityCoverageItem,
+    DocumentEntityCoverageReport,
+    DocumentEntityCoverageStatus,
+)
 from argus.services.latest_news_service import (
     LatestNewsItem,
     LatestNewsReport,
@@ -1247,6 +1253,111 @@ class CLITests(unittest.TestCase):
             "entity_candidate_id=11 entity_mention_id=41 "
             "derived_artifact_id=31 span=5:7 surface='UN' "
             "canonical='un' assignment_decision_id=52",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_document_entity_coverage")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_document_entity_coverage_prints_complete_counts(
+            self,
+            upgrade_database,
+            configure_logging,
+            get_document_entity_coverage,
+    ) -> None:
+        get_document_entity_coverage.return_value = (
+            DocumentEntityCoverageReport(
+                document_version_id=21,
+                document_id=20,
+                version_number=2,
+                candidate_count=2,
+                counts_by_status=(
+                    DocumentEntityCoverageCount(
+                        status=(
+                            DocumentEntityCoverageStatus.SAFE_RESOLVED
+                        ),
+                        count=1,
+                    ),
+                    DocumentEntityCoverageCount(
+                        status=DocumentEntityCoverageStatus.UNASSIGNED,
+                        count=0,
+                    ),
+                    DocumentEntityCoverageCount(
+                        status=DocumentEntityCoverageStatus.BLOCKED,
+                        count=1,
+                    ),
+                    DocumentEntityCoverageCount(
+                        status=(
+                            DocumentEntityCoverageStatus.INVALID_PROVENANCE
+                        ),
+                        count=0,
+                    ),
+                ),
+                items=(
+                    DocumentEntityCoverageItem(
+                        entity_candidate_id=11,
+                        entity_mention_id=41,
+                        derived_artifact_id=31,
+                        entity_type=EntityType.ORGANIZATION,
+                        canonical_text="un",
+                        surface_text="UN",
+                        normalized_text="un",
+                        start_char=5,
+                        end_char=7,
+                        status=DocumentEntityCoverageStatus.BLOCKED,
+                        entity_id=61,
+                        entity_canonical_name="united nations",
+                        assigned_by_alias_decision_id=52,
+                        blocking_validities=(
+                            EntityResolutionValidity.NEEDS_REVIEW,
+                        ),
+                        provenance_issue=None,
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "document-entity-coverage",
+                "--document-version-id",
+                "21",
+                "--limit",
+                "1",
+                "--type",
+                "organization",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        upgrade_database.assert_called_once_with()
+        configure_logging.assert_called_once_with()
+        get_document_entity_coverage.assert_called_once_with(
+            document_version_id=21,
+            limit=1,
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "document_version_id=21 document_id=20 version=2 "
+            "candidates=2 shown=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "coverage=safe_resolved candidates=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "coverage=blocked candidates=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "entity_candidate_id=11 entity_mention_id=41 "
+            "derived_artifact_id=31 type=organization "
+            "coverage=blocked entity_id=61 "
+            "assignment_decision_id=52 "
+            "blocking_validities=needs_review span=5:7 "
+            "surface='UN' canonical='un' provenance_issue=None",
             result.stdout,
         )
 
