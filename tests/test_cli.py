@@ -63,6 +63,12 @@ from argus.services.entity_resolution_service import (
 from argus.services.candidate_resolution_service import (
     CandidateResolutionResult,
 )
+from argus.services.candidate_resolution_queue_service import (
+    CandidateResolutionContext,
+    CandidateResolutionQueue,
+    CandidateResolutionQueueGroup,
+    ExactCanonicalScopeState,
+)
 from argus.services.entity_registry_audit_service import (
     EntityRegistryAuditItem,
     EntityRegistryAuditReport,
@@ -271,6 +277,104 @@ class CLITests(unittest.TestCase):
             "entity_created=true type=organization "
             "canonical_name='un' matched_candidate_ids=11,15,22 "
             "newly_assigned_candidate_ids=11,15,22",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.get_candidate_resolution_queue")
+    def test_candidate_resolution_queue_prints_actionable_groups(
+            self,
+            get_candidate_resolution_queue,
+    ) -> None:
+        get_candidate_resolution_queue.return_value = (
+            CandidateResolutionQueue(
+                document_version_id=21,
+                document_id=20,
+                version_number=2,
+                title="UN article",
+                language="en",
+                identifier_value="https://example.test/article",
+                readiness=DocumentEntityReadinessReport(
+                    document_version_id=21,
+                    document_id=20,
+                    version_number=2,
+                    entity_type=None,
+                    status=DocumentEntityReadinessStatus.INCOMPLETE,
+                    ready_for_downstream_use=False,
+                    candidate_count=5,
+                    safe_resolved_count=2,
+                    unassigned_count=3,
+                    blocked_count=0,
+                    invalid_provenance_count=0,
+                ),
+                unresolved_group_count=1,
+                shown_group_count=1,
+                groups=(
+                    CandidateResolutionQueueGroup(
+                        entity_type=EntityType.ORGANIZATION,
+                        canonical_text="un",
+                        seed_entity_candidate_id=11,
+                        document_candidate_count=2,
+                        corpus_candidate_count=61,
+                        corpus_unassigned_count=59,
+                        corpus_invalid_provenance_count=0,
+                        surface_variants=("UN",),
+                        exact_scope_state=(
+                            ExactCanonicalScopeState.EXTENDS_ENTITY
+                        ),
+                        assigned_entity_ids=(61,),
+                        contexts=(
+                            CandidateResolutionContext(
+                                entity_candidate_id=11,
+                                entity_mention_id=12,
+                                surface_text="UN",
+                                start_char=0,
+                                end_char=2,
+                                context_text="UN officials met.",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "candidate-resolution-queue",
+                "--document-version-id",
+                "21",
+                "--limit",
+                "10",
+                "--contexts",
+                "1",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_candidate_resolution_queue.assert_called_once_with(
+            document_version_id=21,
+            limit=10,
+            contexts_per_group=1,
+            entity_type=None,
+        )
+        self.assertIn(
+            "document_version_id=21 document_id=20 version=2 "
+            "type=all status=incomplete candidates=5 "
+            "safe_resolved=2 unassigned=3 blocked=0 "
+            "invalid_provenance=0 groups=1 shown=1",
+            result.stdout,
+        )
+        self.assertIn(
+            "group seed_candidate_id=11 type=organization "
+            "canonical='un' document_candidates=2 "
+            "corpus_candidates=61 corpus_unassigned=59 "
+            "corpus_invalid_provenance=0 "
+            "exact_scope=extends_entity assigned_entity_ids=61",
+            result.stdout,
+        )
+        self.assertIn(
+            "context candidate_id=11 mention_id=12 span=0:2 "
+            "surface='UN' text='UN officials met.'",
             result.stdout,
         )
 

@@ -972,6 +972,32 @@ the document contract. Registry validity is evaluated once for the batch.
 Versions without candidates remain visible as `no_candidates`. A status filter
 and display limit affect only detailed rows, never complete corpus counts.
 
+### Candidate resolution queue
+
+`CandidateResolutionQueue` is a detached, read-only operator view over one
+document's current readiness state. It contains document identity and metadata,
+the complete readiness counts and a bounded set of unresolved canonical
+groups. The full number of unresolved groups remains available even when the
+display is limited.
+
+Each `CandidateResolutionQueueGroup` is keyed by `EntityType` and exact
+canonical text. It carries an unassigned seed candidate, occurrence counts in
+the document and corpus, document surface variants, bounded source contexts
+and all entity identifiers already assigned inside that exact-canonical
+corpus scope. Its scope state has only three structural values:
+
+- `new_entity`: no candidate in the scope is assigned;
+- `extends_entity`: assigned candidates point to one entity;
+- `invalid_provenance`: at least one candidate in the corpus scope has an
+  invalid immutable provenance chain;
+- `conflict`: assigned candidates point to multiple entities.
+
+The DTO does not assert that two different canonical forms are aliases and
+does not persist queue position. An automatically selected document minimizes
+remaining unassigned observations after first preferring versions without
+blocked or invalid evidence. Explicit candidate decisions remain the only
+write boundary.
+
 ### Ready document selection
 
 `ReadyDocumentSelection` is the narrow admission DTO for entity-dependent

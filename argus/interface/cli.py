@@ -56,6 +56,9 @@ from argus.services.entity_resolution_service import (
 from argus.services.candidate_resolution_service import (
     resolve_candidate_identity,
 )
+from argus.services.candidate_resolution_queue_service import (
+    get_candidate_resolution_queue,
+)
 from argus.services.entity_registry_audit_service import (
     get_entity_registry_audit,
 )
@@ -821,6 +824,90 @@ def resolve_candidate(
         f"matched_candidate_ids={matched_ids} "
         f"newly_assigned_candidate_ids={assigned_ids or 'none'}"
     )
+
+
+@app.command()
+def candidate_resolution_queue(
+        document_version_id: int | None = typer.Option(
+            None,
+            "--document-version-id",
+            min=1,
+            help=(
+                "Exact document version to review. Omit to select the "
+                "most readily completable version."
+            ),
+        ),
+        limit: int = typer.Option(
+            20,
+            min=1,
+            help="Maximum number of unresolved canonical groups to show.",
+        ),
+        contexts: int = typer.Option(
+            2,
+            "--contexts",
+            min=1,
+            help="Maximum number of source contexts per group.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type boundary.",
+        ),
+) -> None:
+    """Show an actionable queue for completing one document."""
+
+    queue = get_candidate_resolution_queue(
+        document_version_id=document_version_id,
+        limit=limit,
+        contexts_per_group=contexts,
+        entity_type=entity_type,
+    )
+    readiness = queue.readiness
+    typer.echo(
+        f"document_version_id={queue.document_version_id} "
+        f"document_id={queue.document_id} "
+        f"version={queue.version_number} "
+        f"type={readiness.entity_type.value if readiness.entity_type else 'all'} "
+        f"status={readiness.status.value} "
+        f"candidates={readiness.candidate_count} "
+        f"safe_resolved={readiness.safe_resolved_count} "
+        f"unassigned={readiness.unassigned_count} "
+        f"blocked={readiness.blocked_count} "
+        f"invalid_provenance={readiness.invalid_provenance_count} "
+        f"groups={queue.unresolved_group_count} "
+        f"shown={queue.shown_group_count}"
+    )
+    typer.echo(
+        f"document title={queue.title!r} "
+        f"language={queue.language or 'unknown'} "
+        f"identifier={queue.identifier_value!r}"
+    )
+    for group in queue.groups:
+        entity_ids = ",".join(
+            str(item) for item in group.assigned_entity_ids
+        )
+        surfaces = " | ".join(group.surface_variants)
+        typer.echo(
+            f"group seed_candidate_id={group.seed_entity_candidate_id} "
+            f"type={group.entity_type.value} "
+            f"canonical={group.canonical_text!r} "
+            f"document_candidates={group.document_candidate_count} "
+            f"corpus_candidates={group.corpus_candidate_count} "
+            f"corpus_unassigned={group.corpus_unassigned_count} "
+            f"corpus_invalid_provenance="
+            f"{group.corpus_invalid_provenance_count} "
+            f"exact_scope={group.exact_scope_state.value} "
+            f"assigned_entity_ids={entity_ids or 'none'} "
+            f"surfaces={surfaces!r}"
+        )
+        for context in group.contexts:
+            typer.echo(
+                f"context candidate_id={context.entity_candidate_id} "
+                f"mention_id={context.entity_mention_id} "
+                f"span={context.start_char}:{context.end_char} "
+                f"surface={context.surface_text!r} "
+                f"text={context.context_text!r}"
+            )
 
 
 @app.command()

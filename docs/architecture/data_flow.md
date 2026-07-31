@@ -508,6 +508,22 @@ merge. Candidate decisions form their own append-only revision history.
 Revocation preserves assignments and earlier evidence but makes the direct
 resolution link unsafe in the shared registry validity snapshot.
 
+`argus candidate-resolution-queue` is the read-only operational companion to
+that mutation. With an explicit document-version identifier it groups only
+that version's currently unassigned candidates by entity type and exact
+canonical text. Without an identifier it selects the actionable version that
+can be completed with the fewest remaining candidate observations, preferring
+versions that have no blocked or invalid registry evidence.
+
+Each group exposes one unassigned seed candidate, document and corpus
+occurrence counts, bounded source contexts and the entity identifiers already
+present anywhere in the exact-canonical scope. The scope is labelled
+`new_entity`, `extends_entity`, `invalid_provenance` or `conflict`; this is
+structural information, not a decision recommendation. The queue never writes
+a decision, invents an identity or bypasses `resolve-candidate`. Running it
+again after an explicit decision recomputes the remaining work from registry
+validity and candidate provenance.
+
 The first entity registry is an explicit consumer of that review ledger.
 `argus resolve-alias` accepts one proposal whose latest decision is
 `approved`. When no proposal candidate has been resolved yet, the operator
