@@ -1014,3 +1014,34 @@ should carry the same artifact identifier.
 
 The bundle is a read model only. It introduces no table, cache, readiness flag
 or mutable analysis state.
+
+### Analysis run
+
+`AnalysisRun` is the immutable preparation record for one future analytical
+execution. It is created only from a strict `DocumentAnalysisInputBundle`
+inside the same database transaction and currently has one lifecycle state:
+`prepared`.
+
+Each row stores:
+
+- the exact `DocumentVersion` and entity-type scope;
+- analytical method and method version;
+- Argus or calling-software version;
+- canonical JSON configuration and its SHA-256 digest;
+- input-manifest schema version;
+- canonical input manifest and its SHA-256 fingerprint;
+- creation time.
+
+The input manifest includes every identity needed to reconstruct and verify
+the bundle: raw and text artifacts, their digests, readiness counts, resolved
+entities, exact occurrences, assignment decisions and latest active resolution
+revisions. Full text is not duplicated; its immutable artifact identifier,
+digest and character count anchor the content.
+
+The reproducible key is the combination of input fingerprint, analytical
+method, method version, software version and configuration digest. Repeating
+the same preparation is idempotent. A configuration change creates a distinct
+run even with the same input; a registry or provenance change creates a
+distinct input fingerprint. Analytical outputs do not yet exist in this
+foundation and must later reference the prepared run rather than silently
+reconstructing their own input boundary.

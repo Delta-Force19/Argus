@@ -682,6 +682,27 @@ The bundle is emitted only at strict `ready` coverage and includes every
 resolved entity and occurrence, so no display limit can truncate analytical
 input. It stores no new readiness, projection or bundle row.
 
+`argus prepare-analysis` is the first persisted analytical boundary. It builds
+the complete bundle and inserts its `AnalysisRun` in the same caller-owned
+transaction. No analytical result is produced yet. The row records the exact
+document version and entity-type scope, analytical method and version,
+software version, canonical JSON configuration and its SHA-256 digest.
+
+The input fingerprint is the SHA-256 digest of a canonical manifest containing
+the document and raw-artifact identities, text-artifact metadata and digest,
+readiness counts, every resolved entity and occurrence, and every active alias
+or direct-candidate decision revision. The manifest anchors text by immutable
+artifact identifier and content digest rather than duplicating the full text
+in the run table.
+
+Identical input, method, method version, software version and configuration
+reuse one prepared run. Any changed configuration receives a different
+configuration digest; any changed bundle evidence receives a different input
+fingerprint. A stored row that conflicts with its reproducible key is rejected
+fail-closed. The current lifecycle contains only `prepared`; execution,
+outputs, completion and failure will be added only with their own explicit
+contracts.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

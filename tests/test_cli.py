@@ -103,6 +103,8 @@ from argus.services.document_analysis_input_service import (
     AnalysisInputText,
     DocumentAnalysisInputBundle,
 )
+from argus.analysis_runs import AnalysisRunStatus
+from argus.services.analysis_run_service import PreparedAnalysisRun
 from argus.documents import DerivedArtifactType, DocumentType
 from argus.services.latest_news_service import (
     LatestNewsItem,
@@ -125,6 +127,93 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.prepare_analysis_run")
+    def test_prepare_analysis_persists_reproducible_contract(
+            self,
+            prepare_analysis_run,
+    ) -> None:
+        prepare_analysis_run.return_value = PreparedAnalysisRun(
+            analysis_run_id=91,
+            created=True,
+            status=AnalysisRunStatus.PREPARED,
+            document_version_id=21,
+            entity_type_scope="organization",
+            analysis_method="rhetoric-signals",
+            analysis_method_version="1.2.0",
+            software_version="5b07cbd",
+            configuration={"threshold": 0.75},
+            configuration_hash="a" * 64,
+            input_schema_version="document-analysis-input@1",
+            input_fingerprint="b" * 64,
+            candidate_count=2,
+            resolved_entity_count=1,
+            resolved_occurrence_count=2,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "prepare-analysis",
+                "--document-version-id",
+                "21",
+                "--type",
+                "organization",
+                "--method",
+                "rhetoric-signals",
+                "--method-version",
+                "1.2.0",
+                "--software-version",
+                "5b07cbd",
+                "--configuration-json",
+                '{"threshold": 0.75}',
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        prepare_analysis_run.assert_called_once_with(
+            document_version_id=21,
+            analysis_method="rhetoric-signals",
+            analysis_method_version="1.2.0",
+            software_version="5b07cbd",
+            configuration={"threshold": 0.75},
+            entity_type=EntityType.ORGANIZATION,
+        )
+        self.assertIn(
+            "analysis_run_id=91 created=true status=prepared "
+            "document_version_id=21 type=organization",
+            result.stdout,
+        )
+        self.assertIn(
+            f"input_fingerprint={'b' * 64}",
+            result.stdout,
+        )
+
+    def test_prepare_analysis_rejects_non_object_configuration(
+            self,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "prepare-analysis",
+                "--document-version-id",
+                "21",
+                "--method",
+                "rhetoric-signals",
+                "--method-version",
+                "1",
+                "--software-version",
+                "5b07cbd",
+                "--configuration-json",
+                "[]",
+            ],
+        )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn(
+            "configuration-json must contain one JSON object",
+            result.output,
+        )
+
     @patch("argus.interface.cli.resolve_candidate_identity")
     def test_resolve_candidate_records_explicit_scoped_decision(
             self,

@@ -90,63 +90,78 @@ def get_document_analysis_input(
 ) -> DocumentAnalysisInputBundle:
     """Read a ready document, its text and entities in one DB snapshot."""
 
+    with session_factory() as session:
+        return build_document_analysis_input(
+            session,
+            document_version_id=document_version_id,
+            entity_type=entity_type,
+        )
+
+
+def build_document_analysis_input(
+        session: Session,
+        *,
+        document_version_id: int,
+        entity_type: EntityType | None = None,
+) -> DocumentAnalysisInputBundle:
+    """Build one bundle inside a caller-owned transaction snapshot."""
+
     if document_version_id < 1:
         raise ValueError(
             "document_version_id must be greater than zero."
         )
 
-    with session_factory() as session:
-        version = session.get(DocumentVersion, document_version_id)
-        if version is None:
-            raise ValueError(
-                "Document version does not exist: "
-                f"{document_version_id}."
-            )
-        document = session.get(Document, version.document_id)
-        if document is None:
-            raise ValueError("Document version references a missing document.")
-        raw_artifact = session.get(RawArtifact, version.raw_artifact_id)
-        if raw_artifact is None:
-            raise ValueError(
-                "Document version references a missing raw artifact."
-            )
-
-        validity = evaluate_entity_registry_validity(session)
-        coverage = evaluate_document_entity_coverage(
-            session,
-            document_version=version,
-            validity=validity,
-            limit=1,
-            entity_type=entity_type,
+    version = session.get(DocumentVersion, document_version_id)
+    if version is None:
+        raise ValueError(
+            "Document version does not exist: "
+            f"{document_version_id}."
         )
-        readiness = evaluate_document_entity_readiness(
-            coverage,
-            entity_type=entity_type,
-        )
-        _require_ready(readiness)
-
-        entities = project_document_entities(
-            session,
-            document_version=version,
-            validity=validity,
-            limit=None,
-            entity_type=entity_type,
-        )
-        _validate_projection(readiness, entities)
-        text = _load_unique_text_input(
-            session,
-            document_version_id=version.id,
-            entity_type=entity_type,
-            expected_candidate_count=readiness.candidate_count,
+    document = session.get(Document, version.document_id)
+    if document is None:
+        raise ValueError("Document version references a missing document.")
+    raw_artifact = session.get(RawArtifact, version.raw_artifact_id)
+    if raw_artifact is None:
+        raise ValueError(
+            "Document version references a missing raw artifact."
         )
 
-        return DocumentAnalysisInputBundle(
-            entity_type=entity_type,
-            document=_document_input(document, version, raw_artifact),
-            text=text,
-            readiness=readiness,
-            entities=entities,
-        )
+    validity = evaluate_entity_registry_validity(session)
+    coverage = evaluate_document_entity_coverage(
+        session,
+        document_version=version,
+        validity=validity,
+        limit=1,
+        entity_type=entity_type,
+    )
+    readiness = evaluate_document_entity_readiness(
+        coverage,
+        entity_type=entity_type,
+    )
+    _require_ready(readiness)
+
+    entities = project_document_entities(
+        session,
+        document_version=version,
+        validity=validity,
+        limit=None,
+        entity_type=entity_type,
+    )
+    _validate_projection(readiness, entities)
+    text = _load_unique_text_input(
+        session,
+        document_version_id=version.id,
+        entity_type=entity_type,
+        expected_candidate_count=readiness.candidate_count,
+    )
+
+    return DocumentAnalysisInputBundle(
+        entity_type=entity_type,
+        document=_document_input(document, version, raw_artifact),
+        text=text,
+        readiness=readiness,
+        entities=entities,
+    )
 
 
 def _require_ready(report: DocumentEntityReadinessReport) -> None:

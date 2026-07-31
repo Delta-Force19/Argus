@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from argus.acquisition.contracts import RetrievalOutcome
+from argus.analysis_runs import AnalysisRunStatus
 from argus.database import Base
 from argus.documents import DerivedArtifactType, DocumentType
 from argus.endpoints import EndpointType
@@ -1181,6 +1182,103 @@ class CandidateResolutionEvidence(Base):
             ),
         ),
         nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class AnalysisRun(Base):
+    """Immutable prepared contract for one reproducible analysis."""
+
+    __tablename__ = "analysis_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "length(input_fingerprint) = 64",
+            name="ck_analysis_runs_input_fingerprint_sha256",
+        ),
+        CheckConstraint(
+            "length(configuration_hash) = 64",
+            name="ck_analysis_runs_configuration_hash_sha256",
+        ),
+        UniqueConstraint(
+            "input_fingerprint",
+            "analysis_method",
+            "analysis_method_version",
+            "software_version",
+            "configuration_hash",
+            name="uq_analysis_runs_reproducible_preparation",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_version_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "document_versions.id",
+            name=(
+                "fk_analysis_runs_document_version_id_"
+                "document_versions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    entity_type_scope: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    analysis_method: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    analysis_method_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    software_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    configuration: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+    configuration_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    input_schema_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    input_manifest: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+    input_fingerprint: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[AnalysisRunStatus] = mapped_column(
+        SQLAlchemyEnum(
+            AnalysisRunStatus,
+            name="analysis_run_status",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        default=AnalysisRunStatus.PREPARED,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(

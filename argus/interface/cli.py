@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -80,6 +81,7 @@ from argus.services.ready_document_selector_service import (
 from argus.services.document_analysis_input_service import (
     get_document_analysis_input,
 )
+from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import (
@@ -1267,6 +1269,81 @@ def document_analysis_input(
             f"active_candidate_resolutions="
             f"{len(entity.active_candidate_resolutions)}"
         )
+
+
+@app.command()
+def prepare_analysis(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact ready document version to fingerprint.",
+        ),
+        analysis_method: str = typer.Option(
+            ...,
+            "--method",
+            help="Stable analytical method identifier.",
+        ),
+        analysis_method_version: str = typer.Option(
+            ...,
+            "--method-version",
+            help="Exact analytical method version.",
+        ),
+        software_version: str = typer.Option(
+            ...,
+            "--software-version",
+            help="Exact Argus/software build identifier.",
+        ),
+        configuration_json: str = typer.Option(
+            "{}",
+            "--configuration-json",
+            help="Analysis configuration as one JSON object.",
+        ),
+        entity_type: EntityType | None = typer.Option(
+            None,
+            "--type",
+            help="Optional entity type readiness boundary.",
+        ),
+) -> None:
+    """Persist one reproducible analysis-run input contract."""
+
+    try:
+        configuration = json.loads(configuration_json)
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter(
+            "configuration-json must be valid JSON."
+        ) from error
+    if not isinstance(configuration, dict):
+        raise typer.BadParameter(
+            "configuration-json must contain one JSON object."
+        )
+
+    result = prepare_analysis_run(
+        document_version_id=document_version_id,
+        analysis_method=analysis_method,
+        analysis_method_version=analysis_method_version,
+        software_version=software_version,
+        configuration=configuration,
+        entity_type=entity_type,
+    )
+    typer.echo(
+        f"analysis_run_id={result.analysis_run_id} "
+        f"created={str(result.created).lower()} "
+        f"status={result.status.value} "
+        f"document_version_id={result.document_version_id} "
+        f"type={result.entity_type_scope} "
+        f"method={result.analysis_method!r} "
+        f"method_version={result.analysis_method_version!r} "
+        f"software_version={result.software_version!r}"
+    )
+    typer.echo(
+        f"input_schema={result.input_schema_version} "
+        f"input_fingerprint={result.input_fingerprint} "
+        f"configuration_hash={result.configuration_hash} "
+        f"candidates={result.candidate_count} "
+        f"entities={result.resolved_entity_count} "
+        f"occurrences={result.resolved_occurrence_count}"
+    )
 
 
 @app.command()

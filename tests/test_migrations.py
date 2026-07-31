@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "alembic_version",
     "alias_decisions",
     "alias_proposals",
+    "analysis_runs",
     "candidate_resolution_decisions",
     "candidate_resolution_evidence",
     "analysis_evidence",
