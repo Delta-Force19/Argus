@@ -54,6 +54,7 @@ class CandidateResolutionStatus(str, Enum):
     """Human outcome for one candidate-identity resolution."""
 
     ASSIGNED = "assigned"
+    NOT_ENTITY = "not_entity"
     REVOKED = "revoked"
 
 

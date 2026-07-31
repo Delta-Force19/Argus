@@ -16,7 +16,7 @@ from argus.services.document_analysis_input_service import (
 from argus.storage.analysis_run_repository import AnalysisRunRepository
 
 
-ANALYSIS_INPUT_SCHEMA_VERSION = "document-analysis-input@1"
+ANALYSIS_INPUT_SCHEMA_VERSION = "document-analysis-input@2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,7 @@ class PreparedAnalysisRun:
     candidate_count: int
     resolved_entity_count: int
     resolved_occurrence_count: int
+    not_entity_count: int = 0
 
 
 def prepare_analysis_run(
@@ -177,6 +178,7 @@ def build_analysis_input_manifest(
             ),
             "candidate_count": readiness.candidate_count,
             "safe_resolved_count": readiness.safe_resolved_count,
+            "not_entity_count": readiness.not_entity_count,
             "unassigned_count": readiness.unassigned_count,
             "blocked_count": readiness.blocked_count,
             "invalid_provenance_count": (
@@ -264,6 +266,33 @@ def build_analysis_input_manifest(
                 key=lambda item: item.entity_id,
             )
         ],
+        "not_entity_resolutions": [
+            {
+                "entity_candidate_id": item.entity_candidate_id,
+                "entity_mention_id": item.entity_mention_id,
+                "derived_artifact_id": item.derived_artifact_id,
+                "entity_type": item.entity_type.value,
+                "canonical_text": item.canonical_text,
+                "surface_text": item.surface_text,
+                "normalized_text": item.normalized_text,
+                "start_char": item.start_char,
+                "end_char": item.end_char,
+                "decision_id": item.decision_id,
+                "revision": item.revision,
+                "scope": item.scope,
+                "reason": item.reason,
+                "reviewer": item.reviewer,
+            }
+            for item in sorted(
+                bundle.not_entity_resolutions,
+                key=lambda value: (
+                    value.start_char,
+                    value.end_char,
+                    value.entity_mention_id,
+                    value.entity_candidate_id,
+                ),
+            )
+        ],
     }
 
 
@@ -317,6 +346,7 @@ def _result(
         resolved_occurrence_count=(
             bundle.entities.resolved_occurrence_count
         ),
+        not_entity_count=bundle.readiness.not_entity_count,
     )
 
 

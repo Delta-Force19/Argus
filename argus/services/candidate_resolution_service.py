@@ -21,6 +21,7 @@ from argus.services.entity_candidate_provenance_service import (
 from argus.storage.candidate_resolution_repository import (
     CandidateResolutionDecisionRepository,
     CandidateResolutionEvidenceRepository,
+    CandidateResolutionExclusionRepository,
 )
 from argus.storage.entity_repository import (
     EntityCandidateAssignmentRepository,
@@ -38,7 +39,7 @@ class CandidateResolutionResult:
     status: CandidateResolutionStatus
     scope: CandidateResolutionScope
     seed_entity_candidate_id: int
-    entity_id: int
+    entity_id: int | None
     entity_type: str
     canonical_name: str
     entity_created: bool
@@ -56,6 +57,7 @@ class CandidateResolutionService:
         self._session = session
         self._decisions = CandidateResolutionDecisionRepository(session)
         self._evidence = CandidateResolutionEvidenceRepository(session)
+        self._exclusions = CandidateResolutionExclusionRepository(session)
         self._entities = EntityRepository(session)
         self._assignments = EntityCandidateAssignmentRepository(session)
 
@@ -83,6 +85,13 @@ class CandidateResolutionService:
                 decision=decision,
                 entity_id=entity_id,
             )
+        if decision.status is CandidateResolutionStatus.NOT_ENTITY:
+            return self._mark_not_entity(
+                candidate=candidate,
+                previous=previous,
+                decision=decision,
+                entity_id=entity_id,
+            )
         return self._assign(
             candidate=candidate,
             previous=previous,
@@ -98,23 +107,52 @@ class CandidateResolutionService:
             decision: ManualCandidateResolutionDecision,
             entity_id: int | None,
     ) -> CandidateResolutionResult:
-        if previous is not None:
-            if previous.entity_id is None:
-                raise ValueError(
-                    "Previous candidate resolution has no target entity."
+        if (
+                previous is not None
+                and previous.status is CandidateResolutionStatus.NOT_ENTITY
+        ):
+            raise ValueError(
+                "A not-entity decision must be revoked before assignment."
+            )
+        if previous is not None and previous.entity_id is not None:
+            if previous.status is CandidateResolutionStatus.REVOKED:
+                historical_entity_ids = {
+                    item.entity_id
+                    for item in self._decisions.get_history(candidate.id)
+                    if item.entity_id is not None
+                }
+                if len(historical_entity_ids) > 1:
+                    raise ValueError(
+                        "Candidate history spans multiple entities."
+                    )
+                historical_entity_id = next(
+                    iter(historical_entity_ids),
+                    None,
                 )
-            if entity_id is not None and entity_id != previous.entity_id:
+                if (
+                        entity_id is not None
+                        and historical_entity_id is not None
+                        and entity_id != historical_entity_id
+                ):
+                    raise ValueError(
+                        "Candidate reassignment requires an explicit entity "
+                        "merge or reassignment workflow."
+                    )
+                entity_id = historical_entity_id or entity_id
+            elif entity_id is not None and entity_id != previous.entity_id:
                 raise ValueError(
                     "Candidate reassignment requires an explicit entity "
                     "merge or reassignment workflow."
                 )
-            entity_id = previous.entity_id
+            else:
+                entity_id = previous.entity_id
 
         candidates = self._resolve_scope(
             seed=candidate,
             scope=decision.scope,
         )
         self._validate_provenance(candidates)
+        self._require_no_active_not_entity_decision(candidates)
         assignments = self._assignments.get_for_candidates(
             [item.id for item in candidates]
         )
@@ -184,6 +222,64 @@ class CandidateResolutionService:
             newly_assigned_candidate_ids=tuple(newly_assigned),
         )
 
+    def _mark_not_entity(
+            self,
+            *,
+            candidate: EntityCandidate,
+            previous,
+            decision: ManualCandidateResolutionDecision,
+            entity_id: int | None,
+    ) -> CandidateResolutionResult:
+        if entity_id is not None:
+            raise ValueError(
+                "entity_id must not be supplied for a not-entity decision."
+            )
+        if previous is not None:
+            if previous.status is CandidateResolutionStatus.ASSIGNED:
+                raise ValueError(
+                    "An assigned decision must be revoked before marking "
+                    "the candidate as not_entity."
+                )
+            if previous.status is CandidateResolutionStatus.NOT_ENTITY:
+                raise ValueError(
+                    "Candidate is already marked as not_entity."
+                )
+
+        candidates = self._resolve_scope(
+            seed=candidate,
+            scope=decision.scope,
+        )
+        self._validate_provenance(candidates)
+        assignments = self._assignments.get_for_candidates(
+            [item.id for item in candidates]
+        )
+        if assignments:
+            raise ValueError(
+                "A not-entity scope contains candidates assigned to an "
+                "entity; revoke or repair those assignments first."
+            )
+        self._require_no_active_not_entity_decision(
+            candidates,
+            allow_seed_candidate_id=candidate.id,
+        )
+        row = self._decisions.record(
+            candidate=candidate,
+            entity_id=None,
+            decision=decision,
+        )
+        self._exclusions.record(
+            decision=row,
+            candidates=candidates,
+        )
+        return self._result(
+            row=row,
+            candidate=candidate,
+            entity=None,
+            entity_created=False,
+            matched_candidates=candidates,
+            newly_assigned_candidate_ids=(),
+        )
+
     def _revoke(
             self,
             *,
@@ -192,16 +288,22 @@ class CandidateResolutionService:
             decision: ManualCandidateResolutionDecision,
             entity_id: int | None,
     ) -> CandidateResolutionResult:
-        if previous is None or previous.entity_id is None:
+        if previous is None:
             raise ValueError(
-                "Candidate resolution cannot be revoked before assignment."
+                "Candidate resolution cannot be revoked before a decision."
             )
+        if previous.status is CandidateResolutionStatus.REVOKED:
+            raise ValueError("Candidate resolution is already revoked.")
         if entity_id is not None:
             raise ValueError(
                 "entity_id must not be supplied when revoking."
             )
-        entity = self._session.get(Entity, previous.entity_id)
-        if entity is None:
+        entity = (
+            self._session.get(Entity, previous.entity_id)
+            if previous.entity_id is not None
+            else None
+        )
+        if previous.entity_id is not None and entity is None:
             raise ValueError(
                 "Previous candidate resolution references a missing entity."
             )
@@ -211,16 +313,60 @@ class CandidateResolutionService:
         )
         row = self._decisions.record(
             candidate=candidate,
-            entity_id=entity.id,
+            entity_id=previous.entity_id,
             decision=decision,
         )
         return self._result(
             row=row,
+            candidate=candidate,
             entity=entity,
             entity_created=False,
             matched_candidates=candidates,
             newly_assigned_candidate_ids=(),
         )
+
+    def _require_no_active_not_entity_decision(
+            self,
+            candidates: tuple[EntityCandidate, ...],
+            *,
+            allow_seed_candidate_id: int | None = None,
+    ) -> None:
+        candidate_ids = {candidate.id for candidate in candidates}
+        candidate_keys = {
+            (candidate.entity_type, candidate.canonical_text)
+            for candidate in candidates
+        }
+        latest = self._decisions.get_all_latest()
+        seed_ids = {
+            decision.seed_entity_candidate_id
+            for decision in latest
+            if decision.status is CandidateResolutionStatus.NOT_ENTITY
+        }
+        seeds = {
+            seed.id: seed
+            for seed in self._session.scalars(
+                select(EntityCandidate).where(EntityCandidate.id.in_(seed_ids))
+            )
+        } if seed_ids else {}
+        for decision in latest:
+            if decision.status is not CandidateResolutionStatus.NOT_ENTITY:
+                continue
+            if decision.seed_entity_candidate_id == allow_seed_candidate_id:
+                continue
+            seed = seeds.get(decision.seed_entity_candidate_id)
+            if seed is None:
+                raise ValueError(
+                    "Active not-entity decision references a missing seed."
+                )
+            overlaps = (
+                seed.id in candidate_ids
+                if decision.scope is CandidateResolutionScope.SINGLE
+                else (seed.entity_type, seed.canonical_text) in candidate_keys
+            )
+            if overlaps:
+                raise ValueError(
+                    "Candidate scope overlaps an active not-entity decision."
+                )
 
     def _resolve_scope(
             self,
@@ -274,7 +420,8 @@ class CandidateResolutionService:
     def _result(
             *,
             row,
-            entity: Entity,
+            candidate: EntityCandidate | None = None,
+            entity: Entity | None,
             entity_created: bool,
             matched_candidates: tuple[EntityCandidate, ...],
             newly_assigned_candidate_ids: tuple[int, ...],
@@ -288,9 +435,17 @@ class CandidateResolutionService:
             status=row.status,
             scope=row.scope,
             seed_entity_candidate_id=row.seed_entity_candidate_id,
-            entity_id=entity.id,
-            entity_type=entity.entity_type.value,
-            canonical_name=entity.canonical_name,
+            entity_id=entity.id if entity is not None else None,
+            entity_type=(
+                entity.entity_type.value
+                if entity is not None
+                else candidate.entity_type.value
+            ),
+            canonical_name=(
+                entity.canonical_name
+                if entity is not None
+                else candidate.canonical_text
+            ),
             entity_created=entity_created,
             matched_candidate_ids=tuple(
                 candidate.id for candidate in matched_candidates

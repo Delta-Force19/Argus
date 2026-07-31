@@ -280,6 +280,62 @@ class CLITests(unittest.TestCase):
             result.stdout,
         )
 
+    @patch("argus.interface.cli.resolve_candidate_identity")
+    def test_resolve_candidate_records_not_entity_without_entity(
+            self,
+            resolve_candidate_identity,
+    ) -> None:
+        resolve_candidate_identity.return_value = CandidateResolutionResult(
+            decision_id=82,
+            revision=1,
+            supersedes_decision_id=None,
+            status=CandidateResolutionStatus.NOT_ENTITY,
+            scope=CandidateResolutionScope.SINGLE,
+            seed_entity_candidate_id=15,
+            entity_id=None,
+            entity_type="group",
+            canonical_name="european",
+            entity_created=False,
+            matched_candidate_ids=(15,),
+            newly_assigned_candidate_ids=(),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "resolve-candidate",
+                "--candidate-id",
+                "15",
+                "--status",
+                "not_entity",
+                "--scope",
+                "single",
+                "--reason",
+                "Adjectival modifier, not a group identity.",
+                "--reviewer",
+                "Victor",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        resolve_candidate_identity.assert_called_once_with(
+            candidate_id=15,
+            entity_id=None,
+            decision=ManualCandidateResolutionDecision(
+                status=CandidateResolutionStatus.NOT_ENTITY,
+                scope=CandidateResolutionScope.SINGLE,
+                reason="Adjectival modifier, not a group identity.",
+                reviewer="Victor",
+            ),
+        )
+        self.assertIn(
+            "status=not_entity scope=single seed_candidate_id=15 "
+            "entity_id=none entity_created=false type=group "
+            "canonical_name='european' matched_candidate_ids=15 "
+            "newly_assigned_candidate_ids=none",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.get_candidate_resolution_queue")
     def test_candidate_resolution_queue_prints_actionable_groups(
             self,
@@ -360,7 +416,7 @@ class CLITests(unittest.TestCase):
         self.assertIn(
             "document_version_id=21 document_id=20 version=2 "
             "type=all status=incomplete candidates=5 "
-            "safe_resolved=2 unassigned=3 blocked=0 "
+            "safe_resolved=2 not_entity=0 unassigned=3 blocked=0 "
             "invalid_provenance=0 groups=1 shown=1",
             result.stdout,
         )
@@ -368,6 +424,7 @@ class CLITests(unittest.TestCase):
             "group seed_candidate_id=11 type=organization "
             "canonical='un' document_candidates=2 "
             "corpus_candidates=61 corpus_unassigned=59 "
+            "corpus_not_entity=0 "
             "corpus_invalid_provenance=0 "
             "exact_scope=extends_entity assigned_entity_ids=61",
             result.stdout,
@@ -494,7 +551,7 @@ class CLITests(unittest.TestCase):
         self.assertIn(
             "document_version_id=21 document_id=20 version=2 "
             "type=organization status=ready candidates=2 "
-            "entities=1 occurrences=2",
+            "entities=1 occurrences=2 not_entity=0",
             result.stdout,
         )
         self.assertIn(
@@ -553,7 +610,7 @@ class CLITests(unittest.TestCase):
         )
         self.assertIn(
             "document document_version_id=21 document_id=20 version=2 "
-            "candidates=3 safe_resolved=3",
+            "candidates=3 safe_resolved=3 not_entity=0",
             result.stdout,
         )
 
@@ -623,7 +680,7 @@ class CLITests(unittest.TestCase):
             result.stdout,
         )
         self.assertIn(
-            "candidates=9 safe_resolved=5 unassigned=2 blocked=1 "
+            "candidates=9 safe_resolved=5 not_entity=0 unassigned=2 blocked=1 "
             "invalid_provenance=1",
             result.stdout,
         )
@@ -673,7 +730,7 @@ class CLITests(unittest.TestCase):
         self.assertIn(
             "document_version_id=21 document_id=20 version=2 "
             "type=organization status=incomplete ready=false "
-            "candidates=3 safe_resolved=2 unassigned=1 blocked=0 "
+            "candidates=3 safe_resolved=2 not_entity=0 unassigned=1 blocked=0 "
             "invalid_provenance=0",
             result.stdout,
         )

@@ -291,7 +291,8 @@ that the entity-resolution stage must consume explicitly.
 
 A `CandidateResolutionDecision` is a separate append-only human decision about
 one exact `EntityCandidate`. It does not masquerade as an alias judgment and
-does not require a second form. Its status is `assigned` or `revoked`; its
+does not require a second form. Its status is `assigned`, `not_entity` or
+`revoked`; its
 explicit scope is either:
 
 - `single`, covering only the seed candidate; or
@@ -317,6 +318,17 @@ registry validity becomes `revoked` without deleting the entity, its
 assignments, the earlier decision or its evidence. Moving an already assigned
 candidate to another entity and merging two entities remain separate future
 workflows and fail closed here.
+
+A `not_entity` revision is an explicit rejection of the NER observation, not
+an identity with a special name. It creates neither an `Entity` nor an
+assignment. `CandidateResolutionExclusion` freezes every candidate actually
+reviewed by that revision, including the exact matched set selected by
+`exact_canonical`; candidates added later do not inherit the old decision.
+The applied exclusion retains its reviewer, reason, scope and complete
+candidate provenance. A later `revoked` revision makes those observations
+unassigned again without deleting the exclusion evidence. An assigned
+candidate and an active not-entity decision may never cover the same
+observation.
 
 ---
 
@@ -404,12 +416,16 @@ candidate, mention, artifact, version or type provenance fail explicitly.
 The document entity coverage audit is the negative-space companion to that
 projection. It reads all `EntityCandidate` rows for one exact
 `DocumentVersion` and assigns each candidate one mutually exclusive state:
-`safe_resolved`, `unassigned`, `blocked`, or `invalid_provenance`.
+`safe_resolved`, `not_entity`, `unassigned`, `blocked`, or
+`invalid_provenance`.
 
 `safe_resolved` uses the same complete registry validity snapshot as the safe
 entity projections. `blocked` means that a candidate assignment exists but the
 entity is unsafe as a whole; the row retains the blocking validity states.
-`unassigned` means no persistent identity has consumed the candidate.
+`not_entity` means an active, provenance-valid human decision rejected the
+observation as a false-positive entity candidate. `unassigned` means neither
+a persistent identity nor an active not-entity decision has consumed the
+candidate.
 `invalid_provenance` exposes a mismatch or missing link among the candidate,
 mention, assignment and entity rather than silently dropping it.
 
@@ -953,8 +969,9 @@ DocumentVersion
         invalid
 ```
 
-`ready` requires one or more candidates and exact 100% `safe_resolved`
-coverage. The remaining states are not percentages or confidence bands:
+`ready` requires one or more candidates and exact 100% reviewed coverage:
+every candidate is either `safe_resolved` or `not_entity`, with no overlap.
+The remaining states are not percentages or confidence bands:
 they are explicit reasons that downstream consumption is unsafe. Provenance
 damage outranks a blocked registry identity, which outranks an unassigned
 candidate. A type-filtered contract applies only to that entity type and must
@@ -990,7 +1007,8 @@ corpus scope. Its scope state has only three structural values:
 - `extends_entity`: assigned candidates point to one entity;
 - `invalid_provenance`: at least one candidate in the corpus scope has an
   invalid immutable provenance chain;
-- `conflict`: assigned candidates point to multiple entities.
+- `conflict`: assigned candidates point to multiple entities, or the scope
+  overlaps an active not-entity decision.
 
 The DTO does not assert that two different canonical forms are aliases and
 does not persist queue position. An automatically selected document minimizes
@@ -1022,12 +1040,15 @@ entity-dependent analytical code. It contains:
 - the one text artifact from which all selected mentions and candidates were
   derived, including its method, version, schema, digest and quality limits;
 - the strict readiness report;
-- the complete safe document entity projection.
+- the complete safe document entity projection;
+- every active not-entity observation with its candidate, mention, span,
+  exact decision, revision, scope, reason and reviewer.
 
 The bundle is constructed inside one caller-owned database snapshot. Registry
 validity is evaluated once and reused for coverage and projection. The
 projection occurrence count must equal the readiness `safe_resolved` count,
-and the projection must be unbounded inside the bundle.
+the not-entity input count must equal readiness `not_entity`, and both views
+must be unbounded inside the bundle.
 
 Candidate and mention rows do not share one derived-artifact identifier.
 Their valid provenance is the explicit three-stage chain
@@ -1058,10 +1079,12 @@ Each row stores:
 - canonical input manifest and its SHA-256 fingerprint;
 - creation time.
 
-The input manifest includes every identity needed to reconstruct and verify
+The `document-analysis-input@2` manifest includes every identity needed to
+reconstruct and verify
 the bundle: raw and text artifacts, their digests, readiness counts, resolved
 entities, exact occurrences, assignment decisions and latest active resolution
-revisions. Full text is not duplicated; its immutable artifact identifier,
+revisions, plus every active not-entity decision and its exact reviewed
+observation. Full text is not duplicated; its immutable artifact identifier,
 digest and character count anchor the content.
 
 The reproducible key is the combination of input fingerprint, analytical

@@ -163,7 +163,7 @@ class CandidateResolutionQueueServiceTests(unittest.TestCase):
         )
         self.assertEqual(group.corpus_invalid_provenance_count, 1)
 
-    def test_rejects_document_without_unassigned_candidates(self) -> None:
+    def test_returns_ready_document_without_unassigned_candidates(self) -> None:
         self.session.close()
         resolve_candidate_identity(
             candidate_id=self.first_id,
@@ -177,11 +177,42 @@ class CandidateResolutionQueueServiceTests(unittest.TestCase):
         )
         self.session = self.session_factory()
 
-        with self.assertRaisesRegex(ValueError, "no unassigned"):
-            get_candidate_resolution_queue(
-                document_version_id=self.first_version_id,
-                session_factory=self.session_factory,
-            )
+        queue = get_candidate_resolution_queue(
+            document_version_id=self.first_version_id,
+            session_factory=self.session_factory,
+        )
+
+        self.assertTrue(queue.readiness.ready_for_downstream_use)
+        self.assertEqual(queue.readiness.unassigned_count, 0)
+        self.assertEqual(queue.unresolved_group_count, 0)
+        self.assertEqual(queue.groups, ())
+
+    def test_exact_scope_reports_active_not_entity_conflict(self) -> None:
+        self.session.close()
+        resolve_candidate_identity(
+            candidate_id=self.third_id,
+            decision=ManualCandidateResolutionDecision(
+                status=CandidateResolutionStatus.NOT_ENTITY,
+                scope=CandidateResolutionScope.SINGLE,
+                reason="Reviewed false-positive NER observation.",
+                reviewer="Victor",
+            ),
+            session_factory=self.session_factory,
+        )
+        self.session = self.session_factory()
+
+        queue = get_candidate_resolution_queue(
+            document_version_id=self.first_version_id,
+            session_factory=self.session_factory,
+        )
+
+        group = queue.groups[0]
+        self.assertEqual(
+            group.exact_scope_state,
+            ExactCanonicalScopeState.CONFLICT,
+        )
+        self.assertEqual(group.corpus_not_entity_count, 1)
+        self.assertEqual(group.corpus_unassigned_count, 2)
 
     def _document(
             self,

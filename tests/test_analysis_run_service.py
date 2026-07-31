@@ -73,7 +73,7 @@ class AnalysisRunServiceTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(
             row.input_manifest["schema_version"],
-            "document-analysis-input@1",
+            "document-analysis-input@2",
         )
         self.assertEqual(
             row.input_manifest["text"]["content_hash"],

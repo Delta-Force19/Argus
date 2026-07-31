@@ -492,7 +492,8 @@ no entity, operational alias or candidate merge.
 
 Direct candidate resolution is a separate operator path for candidates that do
 not require an alias pair. `argus resolve-candidate` accepts one seed candidate,
-an `assigned` or `revoked` status, a reason, a reviewer and an explicit scope.
+an `assigned`, `not_entity` or `revoked` status, a reason, a reviewer and an
+explicit scope.
 With `--scope single`, only the seed observation is covered. With
 `--scope exact_canonical`, all currently persisted candidates having the same
 entity type and exact canonical text are covered in stable identifier order.
@@ -508,6 +509,14 @@ merge. Candidate decisions form their own append-only revision history.
 Revocation preserves assignments and earlier evidence but makes the direct
 resolution link unsafe in the shared registry validity snapshot.
 
+`not_entity` is a distinct reviewed outcome for false-positive NER. It creates
+no entity or assignment. The service persists the exact candidate IDs covered
+by the decision, so `exact_canonical` never expands retroactively when new
+observations enter the corpus. The same provenance checks run before this
+evidence is written. Revoking the decision preserves its history and returns
+the covered observations to `unassigned`; overlap with an entity assignment
+fails closed.
+
 `argus candidate-resolution-queue` is the read-only operational companion to
 that mutation. With an explicit document-version identifier it groups only
 that version's currently unassigned candidates by entity type and exact
@@ -522,7 +531,11 @@ present anywhere in the exact-canonical scope. The scope is labelled
 structural information, not a decision recommendation. The queue never writes
 a decision, invents an identity or bypasses `resolve-candidate`. Running it
 again after an explicit decision recomputes the remaining work from registry
-validity and candidate provenance.
+validity and candidate provenance. Active not-entity observations are removed
+from unresolved groups and reported as conflicts when a later exact-canonical
+scope would overlap them. An explicitly requested ready document is returned
+normally with `unassigned=0` and `groups=0` rather than raising an operator
+traceback.
 
 The first entity registry is an explicit consumer of that review ledger.
 `argus resolve-alias` accepts one proposal whose latest decision is
@@ -611,6 +624,8 @@ once as:
 
 - `safe_resolved` when it is assigned to an entity that passes the complete
   registry validity boundary;
+- `not_entity` when an active explicit decision rejects the provenance-valid
+  observation as a false-positive entity candidate;
 - `unassigned` when no registry assignment exists;
 - `blocked` when an assignment exists but any registry link for that entity is
   no longer active;
@@ -630,8 +645,8 @@ The read-only `argus document-entity-readiness` command,
 `require_document_entity_readiness()` guard turn those complete coverage
 counts into an enforceable document-level contract. The contract has no score
 or configurable completeness threshold. A document version is `ready` only
-when it has at least one entity candidate and every candidate is
-`safe_resolved`.
+when it has at least one entity candidate and every candidate is either
+`safe_resolved` or `not_entity`, with neither overlap nor invalid evidence.
 
 All other states fail closed:
 
@@ -707,7 +722,9 @@ software version, canonical JSON configuration and its SHA-256 digest.
 The input fingerprint is the SHA-256 digest of a canonical manifest containing
 the document and raw-artifact identities, text-artifact metadata and digest,
 readiness counts, every resolved entity and occurrence, and every active alias
-or direct-candidate decision revision. The manifest anchors text by immutable
+or direct-candidate decision revision. Schema `document-analysis-input@2` also
+records every active not-entity observation with the exact decision, revision,
+scope, reviewer and reason. The manifest anchors text by immutable
 artifact identifier and content digest rather than duplicating the full text
 in the run table.
 

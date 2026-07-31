@@ -23,6 +23,10 @@ from argus.models import (
     EntityCandidateAssignment,
     EntityResolutionEvidence,
 )
+from argus.services.candidate_not_entity_audit_service import (
+    CandidateNotEntityAuditItem,
+    evaluate_candidate_not_entity_validity,
+)
 
 
 class EntityResolutionValidity(str, Enum):
@@ -71,6 +75,7 @@ class EntityRegistryAuditReport:
     counts_by_validity: tuple[ResolutionValidityCount, ...]
     items: tuple[EntityRegistryAuditItem, ...]
     candidate_items: tuple["CandidateResolutionAuditItem", ...] = ()
+    not_entity_items: tuple[CandidateNotEntityAuditItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +106,9 @@ class EntityRegistryValiditySnapshot:
     counts_by_validity: tuple[ResolutionValidityCount, ...]
     items: tuple[EntityRegistryAuditItem, ...]
     candidate_items: tuple[CandidateResolutionAuditItem, ...]
+    not_entity_items: tuple[CandidateNotEntityAuditItem, ...] = ()
+    not_entity_candidate_ids: tuple[int, ...] = ()
+    invalid_not_entity_candidate_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +151,7 @@ def get_entity_registry_audit(
         counts_by_validity=snapshot.counts_by_validity,
         items=snapshot.items[:limit],
         candidate_items=snapshot.candidate_items[:limit],
+        not_entity_items=snapshot.not_entity_items[:limit],
     )
 
 
@@ -152,6 +161,7 @@ def evaluate_entity_registry_validity(
     """Compute the complete conservative registry validity boundary."""
 
     rows = _load_rows(session)
+    not_entity = evaluate_candidate_not_entity_validity(session)
     items = _build_items(rows)
     candidate_items = _build_candidate_items(rows)
     grouped_items = _group_by_entity(items)
@@ -216,6 +226,11 @@ def evaluate_entity_registry_validity(
         ),
         items=detached_items,
         candidate_items=detached_candidate_items,
+        not_entity_items=not_entity.items,
+        not_entity_candidate_ids=not_entity.active_candidate_ids,
+        invalid_not_entity_candidate_ids=(
+            not_entity.invalid_candidate_ids
+        ),
     )
 
 

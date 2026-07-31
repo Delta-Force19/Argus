@@ -5,6 +5,7 @@ from argus.knowledge import ManualCandidateResolutionDecision
 from argus.models import (
     CandidateResolutionDecision,
     CandidateResolutionEvidence,
+    CandidateResolutionExclusion,
     Entity,
     EntityCandidate,
 )
@@ -68,6 +69,41 @@ class CandidateResolutionDecisionRepository(
         )
         return self.session.scalar(statement)
 
+    def get_history(
+            self,
+            candidate_id: int,
+    ) -> tuple[CandidateResolutionDecision, ...]:
+        statement = (
+            select(CandidateResolutionDecision)
+            .where(
+                CandidateResolutionDecision.seed_entity_candidate_id
+                == candidate_id
+            )
+            .order_by(
+                CandidateResolutionDecision.revision.asc(),
+                CandidateResolutionDecision.id.asc(),
+            )
+        )
+        return tuple(self.session.scalars(statement).all())
+
+    def get_all_latest(
+            self,
+    ) -> tuple[CandidateResolutionDecision, ...]:
+        decisions = tuple(
+            self.session.scalars(
+                select(CandidateResolutionDecision).order_by(
+                    CandidateResolutionDecision
+                    .seed_entity_candidate_id.asc(),
+                    CandidateResolutionDecision.revision.asc(),
+                    CandidateResolutionDecision.id.asc(),
+                )
+            ).all()
+        )
+        latest: dict[int, CandidateResolutionDecision] = {}
+        for decision in decisions:
+            latest[decision.seed_entity_candidate_id] = decision
+        return tuple(latest[candidate_id] for candidate_id in sorted(latest))
+
 
 class CandidateResolutionEvidenceRepository(
         BaseRepository[CandidateResolutionEvidence]
@@ -106,3 +142,37 @@ class CandidateResolutionEvidenceRepository(
         self.add(row)
         self.flush()
         return row
+
+
+class CandidateResolutionExclusionRepository(
+        BaseRepository[CandidateResolutionExclusion]
+):
+    """Persist the exact candidates reviewed as not entities."""
+
+    def __init__(self, session: Session) -> None:
+        super().__init__(
+            session=session,
+            model_type=CandidateResolutionExclusion,
+        )
+
+    def record(
+            self,
+            *,
+            decision: CandidateResolutionDecision,
+            candidates: tuple[EntityCandidate, ...],
+    ) -> tuple[CandidateResolutionExclusion, ...]:
+        if not candidates:
+            raise ValueError(
+                "Not-entity decision must cover at least one candidate."
+            )
+        rows = tuple(
+            CandidateResolutionExclusion(
+                candidate_resolution_decision_id=decision.id,
+                entity_candidate_id=candidate.id,
+            )
+            for candidate in candidates
+        )
+        for row in rows:
+            self.add(row)
+        self.flush()
+        return rows

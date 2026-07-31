@@ -24,6 +24,7 @@ class ReadyDocumentVersion:
     entity_type: EntityType | None
     candidate_count: int
     safe_resolved_count: int
+    not_entity_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +89,10 @@ def _to_ready_document_version(
         or not report.ready_for_downstream_use
         or report.entity_type is not entity_type
         or report.candidate_count < 1
-        or report.safe_resolved_count != report.candidate_count
+        or (
+            report.safe_resolved_count + report.not_entity_count
+            != report.candidate_count
+        )
         or report.unassigned_count
         or report.blocked_count
         or report.invalid_provenance_count
@@ -105,4 +109,5 @@ def _to_ready_document_version(
         entity_type=entity_type,
         candidate_count=report.candidate_count,
         safe_resolved_count=report.safe_resolved_count,
+        not_entity_count=report.not_entity_count,
     )

@@ -764,7 +764,7 @@ def resolve_candidate(
             ...,
             "--status",
             case_sensitive=False,
-            help="Manual outcome: assigned or revoked.",
+            help="Manual outcome: assigned, not_entity or revoked.",
         ),
         scope: CandidateResolutionScope = typer.Option(
             CandidateResolutionScope.SINGLE,
@@ -792,7 +792,7 @@ def resolve_candidate(
             help="Identifier of the human reviewer.",
         ),
 ) -> None:
-    """Create, link or revoke an explicit candidate identity."""
+    """Assign, exclude or revoke an explicit candidate decision."""
 
     result = resolve_candidate_identity(
         candidate_id=candidate_id,
@@ -817,7 +817,7 @@ def resolve_candidate(
         f"status={result.status.value} "
         f"scope={result.scope.value} "
         f"seed_candidate_id={result.seed_entity_candidate_id} "
-        f"entity_id={result.entity_id} "
+        f"entity_id={result.entity_id or 'none'} "
         f"entity_created={str(result.entity_created).lower()} "
         f"type={result.entity_type} "
         f"canonical_name={result.canonical_name!r} "
@@ -871,6 +871,7 @@ def candidate_resolution_queue(
         f"status={readiness.status.value} "
         f"candidates={readiness.candidate_count} "
         f"safe_resolved={readiness.safe_resolved_count} "
+        f"not_entity={readiness.not_entity_count} "
         f"unassigned={readiness.unassigned_count} "
         f"blocked={readiness.blocked_count} "
         f"invalid_provenance={readiness.invalid_provenance_count} "
@@ -894,6 +895,7 @@ def candidate_resolution_queue(
             f"document_candidates={group.document_candidate_count} "
             f"corpus_candidates={group.corpus_candidate_count} "
             f"corpus_unassigned={group.corpus_unassigned_count} "
+            f"corpus_not_entity={group.corpus_not_entity_count} "
             f"corpus_invalid_provenance="
             f"{group.corpus_invalid_provenance_count} "
             f"exact_scope={group.exact_scope_state.value} "
@@ -927,7 +929,8 @@ def entity_registry_audit(
         f"blocked={report.blocked_entity_count} "
         f"links={report.link_count} "
         f"shown={len(report.items)} "
-        f"candidate_shown={len(report.candidate_items)}"
+        f"candidate_shown={len(report.candidate_items)} "
+        f"not_entity_shown={len(report.not_entity_items)}"
     )
     for count in report.counts_by_validity:
         typer.echo(
@@ -972,6 +975,26 @@ def entity_registry_audit(
             f"latest_revision={item.latest_revision} "
             f"latest_status={item.latest_status.value} "
             f"validity={item.validity.value}"
+        )
+    for item in report.not_entity_items:
+        matched = ",".join(
+            str(candidate_id)
+            for candidate_id in item.matched_candidate_ids
+        )
+        typer.echo(
+            f"not_entity seed_candidate_id={item.seed_candidate_id} "
+            f"type={item.entity_type.value} "
+            f"canonical={item.canonical_text!r} "
+            f"scope={item.scope.value} "
+            f"matched_candidate_ids={matched or 'none'} "
+            f"applied_decision_id={item.applied_decision_id} "
+            f"latest_decision_id={item.latest_decision_id} "
+            f"latest_revision={item.latest_revision} "
+            f"latest_status={item.latest_status.value} "
+            f"reviewer={item.reviewer!r} "
+            f"reason={item.reason!r} "
+            f"validity={item.validity.value} "
+            f"issue={item.issue!r}"
         )
 
 
@@ -1172,7 +1195,10 @@ def document_entity_coverage(
             f"canonical={item.canonical_text!r} "
             f"provenance_issue={item.provenance_issue!r} "
             f"candidate_assignment_decision_id="
-            f"{item.assigned_by_candidate_resolution_decision_id or 'none'}"
+            f"{item.assigned_by_candidate_resolution_decision_id or 'none'} "
+            f"not_entity_decision_id="
+            f"{item.not_entity_decision_id or 'none'} "
+            f"not_entity_revision={item.not_entity_revision or 'none'}"
         )
 
 
@@ -1205,6 +1231,7 @@ def document_entity_readiness(
         f"ready={str(report.ready_for_downstream_use).lower()} "
         f"candidates={report.candidate_count} "
         f"safe_resolved={report.safe_resolved_count} "
+        f"not_entity={report.not_entity_count} "
         f"unassigned={report.unassigned_count} "
         f"blocked={report.blocked_count} "
         f"invalid_provenance={report.invalid_provenance_count}"
@@ -1247,6 +1274,7 @@ def corpus_entity_readiness(
     typer.echo(
         f"candidates={report.candidate_count} "
         f"safe_resolved={report.safe_resolved_count} "
+        f"not_entity={report.not_entity_count} "
         f"unassigned={report.unassigned_count} "
         f"blocked={report.blocked_count} "
         f"invalid_provenance={report.invalid_provenance_count}"
@@ -1265,6 +1293,7 @@ def corpus_entity_readiness(
             f"ready={str(item.ready_for_downstream_use).lower()} "
             f"candidates={item.candidate_count} "
             f"safe_resolved={item.safe_resolved_count} "
+            f"not_entity={item.not_entity_count} "
             f"unassigned={item.unassigned_count} "
             f"blocked={item.blocked_count} "
             f"invalid_provenance={item.invalid_provenance_count}"
@@ -1303,7 +1332,8 @@ def ready_document_versions(
             f"document_id={item.document_id} "
             f"version={item.version_number} "
             f"candidates={item.candidate_count} "
-            f"safe_resolved={item.safe_resolved_count}"
+            f"safe_resolved={item.safe_resolved_count} "
+            f"not_entity={item.not_entity_count}"
         )
 
 
@@ -1336,7 +1366,8 @@ def document_analysis_input(
         f"status={bundle.readiness.status.value} "
         f"candidates={bundle.readiness.candidate_count} "
         f"entities={bundle.entities.resolved_entity_count} "
-        f"occurrences={bundle.entities.resolved_occurrence_count}"
+        f"occurrences={bundle.entities.resolved_occurrence_count} "
+        f"not_entity={bundle.readiness.not_entity_count}"
     )
     typer.echo(
         f"text_artifact_id={bundle.text.derived_artifact_id} "
@@ -1355,6 +1386,18 @@ def document_analysis_input(
             f"active_alias_resolutions={len(entity.active_resolutions)} "
             f"active_candidate_resolutions="
             f"{len(entity.active_candidate_resolutions)}"
+        )
+    for item in bundle.not_entity_resolutions:
+        typer.echo(
+            f"not_entity entity_candidate_id={item.entity_candidate_id} "
+            f"entity_mention_id={item.entity_mention_id} "
+            f"type={item.entity_type.value} "
+            f"canonical={item.canonical_text!r} "
+            f"surface={item.surface_text!r} "
+            f"span={item.start_char}:{item.end_char} "
+            f"decision_id={item.decision_id} "
+            f"revision={item.revision} scope={item.scope} "
+            f"reviewer={item.reviewer!r} reason={item.reason!r}"
         )
 
 
@@ -1429,7 +1472,8 @@ def prepare_analysis(
         f"configuration_hash={result.configuration_hash} "
         f"candidates={result.candidate_count} "
         f"entities={result.resolved_entity_count} "
-        f"occurrences={result.resolved_occurrence_count}"
+        f"occurrences={result.resolved_occurrence_count} "
+        f"not_entity={result.not_entity_count}"
     )
 
 

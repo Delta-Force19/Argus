@@ -40,6 +40,7 @@ class CorpusEntityReadinessReport:
     invalid_provenance_count: int
     counts_by_status: tuple[CorpusEntityReadinessCount, ...]
     items: tuple[DocumentEntityReadinessReport, ...]
+    not_entity_count: int = 0
 
 
 def get_corpus_entity_readiness(
@@ -88,6 +89,9 @@ def get_corpus_entity_readiness(
         candidate_count=sum(item.candidate_count for item in reports),
         safe_resolved_count=sum(
             item.safe_resolved_count for item in reports
+        ),
+        not_entity_count=sum(
+            item.not_entity_count for item in reports
         ),
         unassigned_count=sum(
             item.unassigned_count for item in reports

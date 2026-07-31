@@ -101,12 +101,14 @@ class CorpusEntityReadinessServiceTests(unittest.TestCase):
             document_version_id: int,
             *,
             safe: int = 0,
+            not_entity: int = 0,
             unassigned: int = 0,
             blocked: int = 0,
             invalid: int = 0,
     ) -> DocumentEntityCoverageReport:
         values = {
             DocumentEntityCoverageStatus.SAFE_RESOLVED: safe,
+            DocumentEntityCoverageStatus.NOT_ENTITY: not_entity,
             DocumentEntityCoverageStatus.UNASSIGNED: unassigned,
             DocumentEntityCoverageStatus.BLOCKED: blocked,
             DocumentEntityCoverageStatus.INVALID_PROVENANCE: invalid,

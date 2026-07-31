@@ -1191,6 +1191,48 @@ class CandidateResolutionEvidence(Base):
     )
 
 
+class CandidateResolutionExclusion(Base):
+    """Exact candidate covered by one applied not-entity decision."""
+
+    __tablename__ = "candidate_resolution_exclusions"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_resolution_decision_id",
+            "entity_candidate_id",
+            name="uq_candidate_resolution_exclusion_decision_candidate",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    candidate_resolution_decision_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "candidate_resolution_decisions.id",
+            name=(
+                "fk_candidate_resolution_exclusion_decision_id_"
+                "candidate_resolution_decisions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    entity_candidate_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "entity_candidates.id",
+            name=(
+                "fk_candidate_resolution_exclusion_candidate_id_"
+                "entity_candidates"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
 class AnalysisRun(Base):
     """Immutable prepared contract for one reproducible analysis."""
 

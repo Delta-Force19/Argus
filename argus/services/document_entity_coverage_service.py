@@ -22,6 +22,10 @@ from argus.services.entity_registry_audit_service import (
     EntityResolutionValidity,
     evaluate_entity_registry_validity,
 )
+from argus.services.candidate_not_entity_audit_service import (
+    CandidateNotEntityAuditItem,
+    CandidateNotEntityValidity,
+)
 from argus.services.entity_candidate_provenance_service import (
     resolve_entity_candidate_provenance,
 )
@@ -31,6 +35,7 @@ class DocumentEntityCoverageStatus(str, Enum):
     """Resolution coverage state of one document entity candidate."""
 
     SAFE_RESOLVED = "safe_resolved"
+    NOT_ENTITY = "not_entity"
     UNASSIGNED = "unassigned"
     BLOCKED = "blocked"
     INVALID_PROVENANCE = "invalid_provenance"
@@ -64,6 +69,11 @@ class DocumentEntityCoverageItem:
     blocking_validities: tuple[EntityResolutionValidity, ...]
     provenance_issue: str | None
     assigned_by_candidate_resolution_decision_id: int | None = None
+    not_entity_decision_id: int | None = None
+    not_entity_revision: int | None = None
+    not_entity_scope: str | None = None
+    not_entity_reason: str | None = None
+    not_entity_reviewer: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +179,9 @@ def evaluate_document_entity_coverage(
         validity.items,
         validity.candidate_items,
     )
+    not_entity_by_candidate = _not_entity_by_candidate(
+        validity.not_entity_items
+    )
     rows = _load_rows(
         session,
         document_version_id=document_version.id,
@@ -182,6 +195,10 @@ def evaluate_document_entity_coverage(
             safe_entity_ids=validity.safe_entity_ids,
             blocked_entity_ids=validity.blocked_entity_ids,
             blocking_by_entity=blocking_by_entity,
+            not_entity_by_candidate=not_entity_by_candidate,
+            invalid_not_entity_candidate_ids=set(
+                validity.invalid_not_entity_candidate_ids
+            ),
         )
         for row in rows
     )
@@ -279,6 +296,26 @@ def _blocking_validities_by_entity(
     }
 
 
+def _not_entity_by_candidate(
+        items: tuple[CandidateNotEntityAuditItem, ...],
+) -> dict[int, CandidateNotEntityAuditItem]:
+    result: dict[int, CandidateNotEntityAuditItem] = {}
+    for item in items:
+        if item.validity not in {
+            CandidateNotEntityValidity.ACTIVE,
+            CandidateNotEntityValidity.INVALID,
+        }:
+            continue
+        for candidate_id in item.matched_candidate_ids:
+            if candidate_id in result:
+                raise ValueError(
+                    "Candidate is covered by multiple current not-entity "
+                    "decisions."
+                )
+            result[candidate_id] = item
+    return result
+
+
 def _classify_row(
         session: Session,
         row: _CoverageRow,
@@ -290,7 +327,13 @@ def _classify_row(
             int,
             tuple[EntityResolutionValidity, ...],
         ],
+        not_entity_by_candidate: dict[
+            int,
+            CandidateNotEntityAuditItem,
+        ],
+        invalid_not_entity_candidate_ids: set[int],
 ) -> DocumentEntityCoverageItem:
+    not_entity = not_entity_by_candidate.get(row.candidate.id)
     if row.assignment is not None and row.entity is None:
         issue = "Entity candidate assignment references a missing entity."
     elif (
@@ -311,8 +354,25 @@ def _classify_row(
         else None
     )
 
-    if issue is not None:
+    if (
+            row.candidate.id in invalid_not_entity_candidate_ids
+            and not_entity is None
+    ):
         status = DocumentEntityCoverageStatus.INVALID_PROVENANCE
+        issue = "Candidate has invalid not-entity decision evidence."
+    elif (
+            not_entity is not None
+            and not_entity.validity is CandidateNotEntityValidity.INVALID
+    ):
+        status = DocumentEntityCoverageStatus.INVALID_PROVENANCE
+        issue = not_entity.issue or "Not-entity decision is invalid."
+    elif not_entity is not None and row.assignment is not None:
+        status = DocumentEntityCoverageStatus.INVALID_PROVENANCE
+        issue = "Candidate is both not_entity and assigned to an entity."
+    elif issue is not None:
+        status = DocumentEntityCoverageStatus.INVALID_PROVENANCE
+    elif not_entity is not None:
+        status = DocumentEntityCoverageStatus.NOT_ENTITY
     elif row.assignment is None:
         status = DocumentEntityCoverageStatus.UNASSIGNED
     elif entity_id in safe_entity_ids:
@@ -365,4 +425,29 @@ def _classify_row(
             else ()
         ),
         provenance_issue=issue,
+        not_entity_decision_id=(
+            not_entity.applied_decision_id
+            if status is DocumentEntityCoverageStatus.NOT_ENTITY
+            else None
+        ),
+        not_entity_revision=(
+            not_entity.latest_revision
+            if status is DocumentEntityCoverageStatus.NOT_ENTITY
+            else None
+        ),
+        not_entity_scope=(
+            not_entity.scope.value
+            if status is DocumentEntityCoverageStatus.NOT_ENTITY
+            else None
+        ),
+        not_entity_reason=(
+            not_entity.reason
+            if status is DocumentEntityCoverageStatus.NOT_ENTITY
+            else None
+        ),
+        not_entity_reviewer=(
+            not_entity.reviewer
+            if status is DocumentEntityCoverageStatus.NOT_ENTITY
+            else None
+        ),
     )

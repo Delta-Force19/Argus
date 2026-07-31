@@ -142,12 +142,14 @@ class DocumentEntityReadinessServiceTests(unittest.TestCase):
     def _coverage(
             *,
             safe: int = 0,
+            not_entity: int = 0,
             unassigned: int = 0,
             blocked: int = 0,
             invalid: int = 0,
     ) -> DocumentEntityCoverageReport:
         counts = {
             DocumentEntityCoverageStatus.SAFE_RESOLVED: safe,
+            DocumentEntityCoverageStatus.NOT_ENTITY: not_entity,
             DocumentEntityCoverageStatus.UNASSIGNED: unassigned,
             DocumentEntityCoverageStatus.BLOCKED: blocked,
             DocumentEntityCoverageStatus.INVALID_PROVENANCE: invalid,

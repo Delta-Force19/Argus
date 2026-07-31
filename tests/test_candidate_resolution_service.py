@@ -14,6 +14,7 @@ from argus.knowledge import (
 from argus.models import (
     CandidateResolutionDecision,
     CandidateResolutionEvidence,
+    CandidateResolutionExclusion,
     DerivedArtifact,
     Document,
     DocumentVersion,
@@ -29,6 +30,19 @@ from argus.services.candidate_resolution_service import (
 )
 from argus.services.document_entity_readiness_service import (
     get_document_entity_readiness,
+)
+from argus.services.document_entity_coverage_service import (
+    DocumentEntityCoverageStatus,
+    get_document_entity_coverage,
+)
+from argus.services.document_analysis_input_service import (
+    get_document_analysis_input,
+)
+from argus.services.analysis_run_service import (
+    build_analysis_input_manifest,
+)
+from argus.services.candidate_not_entity_audit_service import (
+    CandidateNotEntityValidity,
 )
 from argus.services.entity_registry_audit_service import (
     EntityResolutionValidity,
@@ -219,6 +233,213 @@ class CandidateResolutionServiceTests(unittest.TestCase):
         self.assertTrue(readiness.ready_for_downstream_use)
         self.assertEqual(readiness.safe_resolved_count, 2)
         self.assertEqual(readiness.unassigned_count, 0)
+
+    def test_not_entity_is_explicit_ready_outcome_without_entity(self) -> None:
+        assigned = self._decide(
+            self.first,
+            status=CandidateResolutionStatus.ASSIGNED,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        excluded = self._decide(
+            self.second,
+            status=CandidateResolutionStatus.NOT_ENTITY,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        self.session.commit()
+
+        self.assertIsNone(excluded.entity_id)
+        self.assertFalse(excluded.entity_created)
+        self.assertEqual(excluded.matched_candidate_ids, (self.second.id,))
+        self.assertEqual(
+            self.session.scalar(
+                select(func.count()).select_from(Entity)
+            ),
+            1,
+        )
+        self.assertEqual(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    CandidateResolutionExclusion
+                )
+            ),
+            1,
+        )
+
+        coverage = get_document_entity_coverage(
+            document_version_id=self.version.id,
+            session_factory=self.session_factory,
+        )
+        statuses = {
+            item.entity_candidate_id: item.status
+            for item in coverage.items
+        }
+        self.assertEqual(
+            statuses,
+            {
+                self.first.id: DocumentEntityCoverageStatus.SAFE_RESOLVED,
+                self.second.id: DocumentEntityCoverageStatus.NOT_ENTITY,
+            },
+        )
+        readiness = get_document_entity_readiness(
+            document_version_id=self.version.id,
+            session_factory=self.session_factory,
+        )
+        self.assertTrue(readiness.ready_for_downstream_use)
+        self.assertEqual(readiness.safe_resolved_count, 1)
+        self.assertEqual(readiness.not_entity_count, 1)
+        self.assertEqual(readiness.unassigned_count, 0)
+
+        audit = get_entity_registry_audit(
+            session_factory=self.session_factory,
+        )
+        self.assertEqual(len(audit.not_entity_items), 1)
+        self.assertEqual(
+            audit.not_entity_items[0].validity,
+            CandidateNotEntityValidity.ACTIVE,
+        )
+        self.assertEqual(audit.not_entity_items[0].reviewer, "Victor")
+        self.assertEqual(assigned.entity_id, audit.candidate_items[0].entity_id)
+
+    def test_exact_not_entity_scope_freezes_reviewed_candidates(self) -> None:
+        result = self._decide(
+            self.first,
+            status=CandidateResolutionStatus.NOT_ENTITY,
+            scope=CandidateResolutionScope.EXACT_CANONICAL,
+        )
+        later_artifact = self._artifact(
+            DerivedArtifactType.ENTITY_CANDIDATES,
+            payload={
+                "input_artifact_id": self.mention_artifact.id,
+                "input_content_hash": self.mention_artifact.content_hash,
+            },
+        )
+        later = EntityCandidate(
+            derived_artifact_id=later_artifact.id,
+            entity_mention_id=self.first.entity_mention_id,
+            document_version_id=self.version.id,
+            entity_type=EntityType.ORGANIZATION,
+            canonical_text="un",
+            context_text=self.text,
+            context_start_char=0,
+            context_end_char=len(self.text),
+        )
+        self.session.add(later)
+        self.session.commit()
+
+        self.assertEqual(
+            result.matched_candidate_ids,
+            (self.first.id, self.second.id),
+        )
+        self.assertEqual(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    CandidateResolutionExclusion
+                )
+            ),
+            2,
+        )
+        coverage = get_document_entity_coverage(
+            document_version_id=self.version.id,
+            session_factory=self.session_factory,
+        )
+        by_id = {
+            item.entity_candidate_id: item.status
+            for item in coverage.items
+        }
+        self.assertEqual(
+            by_id[later.id],
+            DocumentEntityCoverageStatus.UNASSIGNED,
+        )
+
+    def test_not_entity_revocation_restores_unassigned_without_deletion(
+            self,
+    ) -> None:
+        applied = self._decide(
+            self.first,
+            status=CandidateResolutionStatus.NOT_ENTITY,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        revoked = self._decide(
+            self.first,
+            status=CandidateResolutionStatus.REVOKED,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        self.session.commit()
+
+        self.assertEqual(revoked.supersedes_decision_id, applied.decision_id)
+        self.assertEqual(
+            self.session.scalar(
+                select(func.count()).select_from(
+                    CandidateResolutionExclusion
+                )
+            ),
+            1,
+        )
+        coverage = get_document_entity_coverage(
+            document_version_id=self.version.id,
+            session_factory=self.session_factory,
+        )
+        first = next(
+            item for item in coverage.items
+            if item.entity_candidate_id == self.first.id
+        )
+        self.assertEqual(first.status, DocumentEntityCoverageStatus.UNASSIGNED)
+        audit = get_entity_registry_audit(
+            session_factory=self.session_factory,
+        )
+        self.assertEqual(
+            audit.not_entity_items[0].validity,
+            CandidateNotEntityValidity.REVOKED,
+        )
+
+    def test_not_entity_is_in_atomic_analysis_input(self) -> None:
+        self._decide(
+            self.first,
+            status=CandidateResolutionStatus.ASSIGNED,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        excluded = self._decide(
+            self.second,
+            status=CandidateResolutionStatus.NOT_ENTITY,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        self.session.commit()
+
+        bundle = get_document_analysis_input(
+            document_version_id=self.version.id,
+            session_factory=self.session_factory,
+        )
+        self.assertEqual(len(bundle.not_entity_resolutions), 1)
+        item = bundle.not_entity_resolutions[0]
+        self.assertEqual(item.entity_candidate_id, self.second.id)
+        self.assertEqual(item.decision_id, excluded.decision_id)
+        self.assertEqual(item.scope, "single")
+        manifest = build_analysis_input_manifest(bundle)
+        self.assertEqual(manifest["schema_version"], "document-analysis-input@2")
+        self.assertEqual(
+            manifest["not_entity_resolutions"][0]["decision_id"],
+            excluded.decision_id,
+        )
+
+    def test_not_entity_rejects_assignment_conflicts(self) -> None:
+        assigned = self._decide(
+            self.first,
+            status=CandidateResolutionStatus.ASSIGNED,
+            scope=CandidateResolutionScope.SINGLE,
+        )
+        with self.assertRaisesRegex(ValueError, "must be revoked"):
+            self._decide(
+                self.first,
+                status=CandidateResolutionStatus.NOT_ENTITY,
+                scope=CandidateResolutionScope.SINGLE,
+            )
+        with self.assertRaisesRegex(ValueError, "entity_id"):
+            self._decide(
+                self.second,
+                status=CandidateResolutionStatus.NOT_ENTITY,
+                scope=CandidateResolutionScope.SINGLE,
+                entity_id=assigned.entity_id,
+            )
 
     def test_missing_seed_assignment_fails_closed_in_registry_audit(
             self,

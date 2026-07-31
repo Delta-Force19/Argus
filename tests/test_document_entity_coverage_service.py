@@ -85,6 +85,7 @@ class DocumentEntityCoverageServiceTests(unittest.TestCase):
             self._counts(report),
             {
                 DocumentEntityCoverageStatus.SAFE_RESOLVED: 2,
+                DocumentEntityCoverageStatus.NOT_ENTITY: 0,
                 DocumentEntityCoverageStatus.UNASSIGNED: 1,
                 DocumentEntityCoverageStatus.BLOCKED: 0,
                 DocumentEntityCoverageStatus.INVALID_PROVENANCE: 0,

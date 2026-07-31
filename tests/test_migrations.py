@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "analysis_runs",
     "candidate_resolution_decisions",
     "candidate_resolution_evidence",
+    "candidate_resolution_exclusions",
     "analysis_evidence",
     "articles",
     "collection_endpoints",

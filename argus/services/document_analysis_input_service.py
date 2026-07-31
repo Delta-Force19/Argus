@@ -16,6 +16,8 @@ from argus.models import (
     RawArtifact,
 )
 from argus.services.document_entity_coverage_service import (
+    DocumentEntityCoverageItem,
+    DocumentEntityCoverageStatus,
     evaluate_document_entity_coverage,
 )
 from argus.services.document_entity_projection_service import (
@@ -80,6 +82,27 @@ class DocumentAnalysisInputBundle:
     text: AnalysisInputText
     readiness: DocumentEntityReadinessReport
     entities: DocumentEntityProjection
+    not_entity_resolutions: tuple["AnalysisInputNotEntity", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisInputNotEntity:
+    """One provenance-checked false-positive NER observation."""
+
+    entity_candidate_id: int
+    entity_mention_id: int
+    derived_artifact_id: int
+    entity_type: EntityType
+    canonical_text: str
+    surface_text: str
+    normalized_text: str
+    start_char: int
+    end_char: int
+    decision_id: int
+    revision: int
+    scope: str
+    reason: str
+    reviewer: str
 
 
 def get_document_analysis_input(
@@ -131,7 +154,7 @@ def build_document_analysis_input(
         session,
         document_version=version,
         validity=validity,
-        limit=1,
+        limit=2**31 - 1,
         entity_type=entity_type,
     )
     readiness = evaluate_document_entity_readiness(
@@ -148,6 +171,7 @@ def build_document_analysis_input(
         entity_type=entity_type,
     )
     _validate_projection(readiness, entities)
+    not_entity_resolutions = _not_entity_inputs(coverage.items)
     text = _load_unique_text_input(
         session,
         document_version_id=version.id,
@@ -161,6 +185,7 @@ def build_document_analysis_input(
         text=text,
         readiness=readiness,
         entities=entities,
+        not_entity_resolutions=not_entity_resolutions,
     )
 
 
@@ -169,7 +194,10 @@ def _require_ready(report: DocumentEntityReadinessReport) -> None:
         report.status is not DocumentEntityReadinessStatus.READY
         or not report.ready_for_downstream_use
         or report.candidate_count < 1
-        or report.safe_resolved_count != report.candidate_count
+        or (
+            report.safe_resolved_count + report.not_entity_count
+            != report.candidate_count
+        )
         or report.unassigned_count
         or report.blocked_count
         or report.invalid_provenance_count
@@ -179,6 +207,49 @@ def _require_ready(report: DocumentEntityReadinessReport) -> None:
             f"document_version_id={report.document_version_id} "
             f"status={report.status.value}."
         )
+
+
+def _not_entity_inputs(
+        items: tuple[DocumentEntityCoverageItem, ...],
+) -> tuple[AnalysisInputNotEntity, ...]:
+    result: list[AnalysisInputNotEntity] = []
+    for item in items:
+        if item.status is not DocumentEntityCoverageStatus.NOT_ENTITY:
+            continue
+        required = (
+            item.surface_text,
+            item.normalized_text,
+            item.start_char,
+            item.end_char,
+            item.not_entity_decision_id,
+            item.not_entity_revision,
+            item.not_entity_scope,
+            item.not_entity_reason,
+            item.not_entity_reviewer,
+        )
+        if any(value is None for value in required):
+            raise ValueError(
+                "Not-entity analysis input is missing decision provenance."
+            )
+        result.append(
+            AnalysisInputNotEntity(
+                entity_candidate_id=item.entity_candidate_id,
+                entity_mention_id=item.entity_mention_id,
+                derived_artifact_id=item.derived_artifact_id,
+                entity_type=item.entity_type,
+                canonical_text=item.canonical_text,
+                surface_text=item.surface_text,
+                normalized_text=item.normalized_text,
+                start_char=item.start_char,
+                end_char=item.end_char,
+                decision_id=item.not_entity_decision_id,
+                revision=item.not_entity_revision,
+                scope=item.not_entity_scope,
+                reason=item.not_entity_reason,
+                reviewer=item.not_entity_reviewer,
+            )
+        )
+    return tuple(result)
 
 
 def _validate_projection(

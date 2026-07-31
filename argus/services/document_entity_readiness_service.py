@@ -38,6 +38,7 @@ class DocumentEntityReadinessReport:
     unassigned_count: int
     blocked_count: int
     invalid_provenance_count: int
+    not_entity_count: int = 0
 
 
 def get_document_entity_readiness(
@@ -75,6 +76,10 @@ def evaluate_document_entity_readiness(
         DocumentEntityCoverageStatus.SAFE_RESOLVED,
         0,
     )
+    not_entity_count = counts.get(
+        DocumentEntityCoverageStatus.NOT_ENTITY,
+        0,
+    )
     unassigned_count = counts.get(
         DocumentEntityCoverageStatus.UNASSIGNED,
         0,
@@ -108,6 +113,7 @@ def evaluate_document_entity_readiness(
         unassigned_count=unassigned_count,
         blocked_count=blocked_count,
         invalid_provenance_count=invalid_provenance_count,
+        not_entity_count=not_entity_count,
     )
 
 

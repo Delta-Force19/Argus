@@ -68,6 +68,7 @@ class CandidateResolutionQueueGroup:
     exact_scope_state: ExactCanonicalScopeState
     assigned_entity_ids: tuple[int, ...]
     contexts: tuple[CandidateResolutionContext, ...]
+    corpus_not_entity_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +142,12 @@ def get_candidate_resolution_queue(
             rows=rows,
             unresolved_candidate_ids=unresolved_candidate_ids,
             contexts_per_group=contexts_per_group,
+            not_entity_candidate_ids=set(
+                validity.not_entity_candidate_ids
+            ),
+            invalid_not_entity_candidate_ids=set(
+                validity.invalid_not_entity_candidate_ids
+            ),
         )
 
     return CandidateResolutionQueue(
@@ -177,11 +184,6 @@ def _select_document(
             document_version=version,
             entity_type=entity_type,
         )
-        if readiness.unassigned_count == 0:
-            raise ValueError(
-                "Document version has no unassigned entity candidates: "
-                f"{document_version_id}."
-            )
         return version, readiness
 
     actionable: list[
@@ -312,6 +314,8 @@ def _build_groups(
         rows: tuple[_CandidateRow, ...],
         unresolved_candidate_ids: set[int],
         contexts_per_group: int,
+        not_entity_candidate_ids: set[int],
+        invalid_not_entity_candidate_ids: set[int],
 ) -> tuple[CandidateResolutionQueueGroup, ...]:
     document_groups: dict[
         tuple[EntityType, str],
@@ -350,8 +354,18 @@ def _build_groups(
             is not None
             for row in matching_corpus_rows
         )
-        if invalid_provenance_count:
+        not_entity_count = sum(
+            row.candidate.id in not_entity_candidate_ids
+            for row in matching_corpus_rows
+        )
+        invalid_not_entity_count = sum(
+            row.candidate.id in invalid_not_entity_candidate_ids
+            for row in matching_corpus_rows
+        )
+        if invalid_provenance_count or invalid_not_entity_count:
             scope_state = ExactCanonicalScopeState.INVALID_PROVENANCE
+        elif not_entity_count:
+            scope_state = ExactCanonicalScopeState.CONFLICT
         elif not assigned_entity_ids:
             scope_state = ExactCanonicalScopeState.NEW_ENTITY
         elif len(assigned_entity_ids) == 1:
@@ -369,6 +383,7 @@ def _build_groups(
                 corpus_candidate_count=len(matching_corpus_rows),
                 corpus_unassigned_count=sum(
                     row.assigned_entity_id is None
+                    and row.candidate.id not in not_entity_candidate_ids
                     for row in matching_corpus_rows
                 ),
                 corpus_invalid_provenance_count=(
@@ -392,6 +407,7 @@ def _build_groups(
                     )
                     for row in document_rows[:contexts_per_group]
                 ),
+                corpus_not_entity_count=not_entity_count,
             )
         )
     return tuple(sorted(
