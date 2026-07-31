@@ -17,7 +17,9 @@ from argus.models import (
     EntityCandidate,
     EntityMention,
     EntityResolutionEvidence,
+    DerivedArtifact,
 )
+from argus.documents import DerivedArtifactType
 from argus.services.alias_decision_service import AliasDecisionService
 from argus.services.document_entity_projection_service import (
     get_document_entity_projection,
@@ -321,15 +323,30 @@ class DocumentEntityProjectionServiceTests(unittest.TestCase):
             if document_version_id is not None
             else self.document_version.id
         )
-        next_id = (
-            self.session.scalar(
-                select(func.count()).select_from(EntityMention)
-            )
-            or 0
-        ) + 1
         end_char = start_char + len(surface_text)
+        source_text = (
+            (" " * start_char)
+            + surface_text
+            + " appeared in the source."
+        )
+        text_artifact = self._artifact(
+            DerivedArtifactType.EXTRACTED_TEXT,
+            document_version_id=version_id,
+            payload={
+                "text": source_text,
+                "character_count": len(source_text),
+            },
+        )
+        mention_artifact = self._artifact(
+            DerivedArtifactType.ENTITY_MENTIONS,
+            document_version_id=version_id,
+            payload={
+                "input_artifact_id": text_artifact.id,
+                "input_content_hash": text_artifact.content_hash,
+            },
+        )
         mention = EntityMention(
-            derived_artifact_id=next_id,
+            derived_artifact_id=mention_artifact.id,
             document_version_id=version_id,
             entity_type=entity_type,
             source_label=entity_type.value.upper(),
@@ -340,8 +357,16 @@ class DocumentEntityProjectionServiceTests(unittest.TestCase):
         )
         self.session.add(mention)
         self.session.flush()
+        candidate_artifact = self._artifact(
+            DerivedArtifactType.ENTITY_CANDIDATES,
+            document_version_id=version_id,
+            payload={
+                "input_artifact_id": mention_artifact.id,
+                "input_content_hash": mention_artifact.content_hash,
+            },
+        )
         row = EntityCandidate(
-            derived_artifact_id=mention.derived_artifact_id,
+            derived_artifact_id=candidate_artifact.id,
             entity_mention_id=mention.id,
             document_version_id=version_id,
             entity_type=entity_type,
@@ -349,6 +374,33 @@ class DocumentEntityProjectionServiceTests(unittest.TestCase):
             context_text=f"{surface_text} appeared in the source.",
             context_start_char=start_char,
             context_end_char=end_char,
+        )
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+    def _artifact(
+            self,
+            artifact_type: DerivedArtifactType,
+            *,
+            document_version_id: int,
+            payload: dict[str, object],
+    ) -> DerivedArtifact:
+        index = (
+            self.session.scalar(
+                select(func.count()).select_from(DerivedArtifact)
+            )
+            or 0
+        ) + 1
+        row = DerivedArtifact(
+            document_version_id=document_version_id,
+            artifact_type=artifact_type,
+            method=f"test-{artifact_type.value}",
+            method_version="1",
+            schema_version="1",
+            content_hash=f"{index:064x}",
+            payload=payload,
+            quality_limitations=[],
         )
         self.session.add(row)
         self.session.flush()
