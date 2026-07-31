@@ -715,10 +715,11 @@ input. It stores no new readiness, projection or bundle row.
 
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
-transaction. No analytical result is produced yet. The row records the exact
+transaction. The row records the exact
 document version and entity-type scope, analytical method and version,
 automatically verified software version, canonical JSON configuration and its
 SHA-256 digest. The command accepts no caller-supplied software version.
+Only exact method/version pairs in the executable registry may be prepared.
 
 In a Git checkout, preparation requires a completely clean Argus worktree and
 records `git:<full-commit-sha>`. Tracked, staged and untracked changes all fail
@@ -744,8 +745,37 @@ reuse one prepared run. Any changed configuration receives a different
 configuration digest; any changed bundle evidence receives a different input
 fingerprint; any changed verified code identity receives a different run. A
 stored row that conflicts with its reproducible key is rejected fail-closed.
-The current lifecycle contains only `prepared`; execution, outputs, completion
-and failure will be added only with their own explicit contracts.
+
+`argus execute-analysis` claims one run atomically. Only `prepared`, or
+`failed` with explicit `--retry-failed`, can become `running`; every successful
+claim increments the attempt counter. The claim is committed before method
+execution, so an interrupted process cannot be mistaken for a never-started
+run. Parallel or stale-running recovery is not yet automatic.
+
+Before a claim, Argus verifies the canonical input and configuration hashes,
+the persisted text artifact and the exact current software provenance. A
+prepared run from another code version cannot be executed by the current code;
+a new preparation is required. Unknown methods, unsupported configurations and
+unsupported document languages fail before a claim and therefore do not create
+a false execution attempt.
+
+On success, one immutable `AnalysisResult` and the `completed` transition are
+committed atomically. The output hash covers its schema, canonical JSON payload
+and warnings. On method failure, no result is inserted; the run becomes
+`failed`, retains a bounded diagnostic and can be retried only explicitly.
+Repeating a completed execution verifies its stored input and output, then
+returns the same result with `executed=false`.
+
+`argus analysis-result` reads a completed result without requiring the current
+code version to match the historical run. It still verifies the run hashes,
+text artifact and output hash before emitting canonical JSON. This separates
+historical inspection from permission to execute old input under new code.
+
+The first executable method is
+`lexical-discourse@lexical-en-v0.1`, backed by the existing English lexical
+discourse analyzer. It accepts `{}` and emits
+`lexical-discourse-result@1`; the earlier ad hoc `rhetoric-signals` name is not
+treated as an implementation merely because it appears in historical runs.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication

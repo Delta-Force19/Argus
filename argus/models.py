@@ -1234,7 +1234,7 @@ class CandidateResolutionExclusion(Base):
 
 
 class AnalysisRun(Base):
-    """Immutable prepared contract for one reproducible analysis."""
+    """Immutable input contract plus audited execution lifecycle."""
 
     __tablename__ = "analysis_runs"
     __table_args__ = (
@@ -1245,6 +1245,10 @@ class AnalysisRun(Base):
         CheckConstraint(
             "length(configuration_hash) = 64",
             name="ck_analysis_runs_configuration_hash_sha256",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_analysis_runs_attempt_count_non_negative",
         ),
         UniqueConstraint(
             "input_fingerprint",
@@ -1321,6 +1325,72 @@ class AnalysisRun(Base):
         ),
         nullable=False,
         default=AnalysisRunStatus.PREPARED,
+        index=True,
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class AnalysisResult(Base):
+    """One immutable, content-addressed output for an analysis run."""
+
+    __tablename__ = "analysis_results"
+    __table_args__ = (
+        CheckConstraint(
+            "length(output_hash) = 64",
+            name="ck_analysis_results_output_hash_sha256",
+        ),
+        UniqueConstraint(
+            "analysis_run_id",
+            name="uq_analysis_results_analysis_run_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analysis_run_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "analysis_runs.id",
+            name="fk_analysis_results_analysis_run_id_analysis_runs",
+        ),
+        nullable=False,
+        index=True,
+    )
+    result_schema_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+    warnings: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    output_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(

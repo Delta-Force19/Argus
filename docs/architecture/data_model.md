@@ -1064,10 +1064,11 @@ or mutable analysis state.
 
 ### Analysis run
 
-`AnalysisRun` is the immutable preparation record for one future analytical
-execution. It is created only from a strict `DocumentAnalysisInputBundle`
-inside the same database transaction and currently has one lifecycle state:
-`prepared`.
+`AnalysisRun` is the immutable input contract and mutable execution ledger for
+one analytical execution. It is created only from a strict
+`DocumentAnalysisInputBundle` inside the same database transaction. Its
+lifecycle is `prepared -> running -> completed` or
+`prepared/failed -> running -> failed`; retrying a failure is always explicit.
 
 Each row stores:
 
@@ -1077,6 +1078,7 @@ Each row stores:
 - canonical JSON configuration and its SHA-256 digest;
 - input-manifest schema version;
 - canonical input manifest and its SHA-256 fingerprint;
+- status, attempt count, last error and execution timestamps;
 - creation time.
 
 The `document-analysis-input@2` manifest includes every identity needed to
@@ -1091,9 +1093,9 @@ The reproducible key is the combination of input fingerprint, analytical
 method, method version, software version and configuration digest. Repeating
 the same preparation is idempotent. A configuration change creates a distinct
 run even with the same input; a registry or provenance change creates a
-distinct input fingerprint. Analytical outputs do not yet exist in this
-foundation and must later reference the prepared run rather than silently
-reconstructing their own input boundary.
+distinct input fingerprint. Preparation accepts only an exact method and
+method-version pair present in the executable method registry. This prevents
+unexecutable names from being recorded as if an implementation existed.
 
 Software identity is not accepted from the caller. A clean Git checkout stores
 `git:<full-commit-sha>` and refuses preparation when tracked, staged or
@@ -1104,3 +1106,27 @@ configuration. Existing but unusable Git metadata is an error rather than a
 reason to downgrade to content-hash provenance. Both forms are self-describing
 and fit the existing `software_version` field and reproducible key, so this
 contract requires no schema migration.
+
+### Analysis result
+
+`AnalysisResult` is the single immutable output of one completed
+`AnalysisRun`. It stores:
+
+- the exact run identifier;
+- a result-schema version;
+- a canonical JSON payload;
+- explicit warnings;
+- a SHA-256 hash over schema, payload and warnings;
+- creation time.
+
+The one-result-per-run constraint prevents an execution from silently
+overwriting history. A successful repeated execution request returns the
+existing hash-verified result without invoking the method again. A corrupted
+run manifest, configuration, text artifact or result hash fails closed.
+
+The first registered method is
+`lexical-discourse@lexical-en-v0.1`. It adapts the existing deterministic
+English lexical discourse analyzer and emits schema
+`lexical-discourse-result@1`. It accepts an empty configuration only and
+records counts plus sentence-level lexical evidence. Other languages and
+method configurations require their own explicit versions.

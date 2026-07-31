@@ -85,6 +85,10 @@ from argus.services.document_analysis_input_service import (
     get_document_analysis_input,
 )
 from argus.services.analysis_run_service import prepare_analysis_run
+from argus.services.analysis_execution_service import (
+    execute_analysis_run,
+    get_analysis_run_result,
+)
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
 from argus.knowledge import (
@@ -1469,6 +1473,83 @@ def prepare_analysis(
         f"occurrences={result.resolved_occurrence_count} "
         f"not_entity={result.not_entity_count}"
     )
+
+
+@app.command()
+def execute_analysis(
+        analysis_run_id: int = typer.Option(
+            ...,
+            "--analysis-run-id",
+            min=1,
+            help="Exact prepared analysis run to execute.",
+        ),
+        retry_failed: bool = typer.Option(
+            False,
+            "--retry-failed",
+            help="Retry a failed run without changing its input contract.",
+        ),
+) -> None:
+    """Execute one registered method and persist its immutable result."""
+
+    result = execute_analysis_run(
+        analysis_run_id=analysis_run_id,
+        retry_failed=retry_failed,
+    )
+    typer.echo(
+        f"analysis_run_id={result.analysis_run_id} "
+        f"analysis_result_id={result.analysis_result_id} "
+        f"executed={str(result.executed).lower()} "
+        f"status={result.status.value} "
+        f"attempts={result.attempt_count} "
+        f"method={result.analysis_method!r} "
+        f"method_version={result.analysis_method_version!r} "
+        f"software_version={result.software_version!r}"
+    )
+    typer.echo(
+        f"result_schema={result.result_schema_version} "
+        f"output_hash={result.output_hash} "
+        f"warnings={result.warning_count}"
+    )
+
+
+@app.command()
+def analysis_result(
+        analysis_run_id: int = typer.Option(
+            ...,
+            "--analysis-run-id",
+            min=1,
+            help="Completed analysis run whose result should be shown.",
+        ),
+) -> None:
+    """Read one completed, hash-verified analytical result."""
+
+    result = get_analysis_run_result(
+        analysis_run_id=analysis_run_id,
+    )
+    typer.echo(
+        f"analysis_run_id={result.analysis_run_id} "
+        f"analysis_result_id={result.analysis_result_id} "
+        f"status={result.status.value} attempts={result.attempt_count} "
+        f"method={result.analysis_method!r} "
+        f"method_version={result.analysis_method_version!r} "
+        f"software_version={result.software_version!r}"
+    )
+    typer.echo(
+        f"result_schema={result.result_schema_version} "
+        f"output_hash={result.output_hash} "
+        f"warnings={len(result.warnings)}"
+    )
+    typer.echo(
+        "payload="
+        + json.dumps(
+            result.payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    for warning in result.warnings:
+        typer.echo(f"warning={warning!r}")
 
 
 @app.command()

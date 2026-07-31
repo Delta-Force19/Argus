@@ -6,6 +6,10 @@ import json
 from sqlalchemy.orm import Session
 
 from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis.methods import (
+    AnalysisMethodRegistry,
+    default_analysis_method_registry,
+)
 from argus.database import SessionLocal
 from argus.knowledge import EntityType
 from argus.models import AnalysisRun
@@ -51,6 +55,7 @@ def prepare_analysis_run(
         analysis_method_version: str,
         configuration: Mapping[str, object] | None = None,
         entity_type: EntityType | None = None,
+        registry: AnalysisMethodRegistry | None = None,
         session_factory: Callable[[], Session] = SessionLocal,
 ) -> PreparedAnalysisRun:
     """Atomically fingerprint one ready bundle and persist its run."""
@@ -83,6 +88,15 @@ def prepare_analysis_run(
                 entity_type=entity_type,
             )
             manifest = build_analysis_input_manifest(bundle)
+            method_registry = registry or default_analysis_method_registry()
+            registered_method = method_registry.require(
+                method,
+                method_version,
+            )
+            registered_method.validate(
+                input_manifest=manifest,
+                configuration=normalized_configuration,
+            )
             input_fingerprint = _json_fingerprint(manifest)
             scope = (
                 entity_type.value if entity_type is not None else "all"

@@ -18,6 +18,7 @@ EXPECTED_TABLES = {
     "alias_decisions",
     "alias_proposals",
     "analysis_runs",
+    "analysis_results",
     "candidate_resolution_decisions",
     "candidate_resolution_evidence",
     "candidate_resolution_exclusions",
@@ -834,6 +835,195 @@ class MigrationIntegrationTests(unittest.TestCase):
 
         self.assertNotIn("alias_decisions", table_names)
         self.assertIn("alias_proposals", table_names)
+
+    def test_analysis_execution_migration_adds_lifecycle_and_result(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = (
+                Path(temporary_directory) / "analysis_execution.db"
+            )
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "head")
+
+            test_engine = create_engine(database_url)
+            try:
+                inspector = inspect(test_engine)
+                run_columns = {
+                    column["name"]
+                    for column in inspector.get_columns("analysis_runs")
+                }
+                result_columns = {
+                    column["name"]
+                    for column in inspector.get_columns("analysis_results")
+                }
+                foreign_keys = inspector.get_foreign_keys(
+                    "analysis_results"
+                )
+            finally:
+                test_engine.dispose()
+
+        self.assertTrue({
+            "attempt_count",
+            "last_error",
+            "started_at",
+            "finished_at",
+        }.issubset(run_columns))
+        self.assertEqual(
+            result_columns,
+            {
+                "id",
+                "analysis_run_id",
+                "result_schema_version",
+                "payload",
+                "warnings",
+                "output_hash",
+                "created_at",
+            },
+        )
+        self.assertEqual(
+            {
+                foreign_key["referred_table"]
+                for foreign_key in foreign_keys
+            },
+            {"analysis_runs"},
+        )
+
+    def test_analysis_execution_migration_preserves_prepared_runs(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = (
+                Path(temporary_directory) / "analysis_run_upgrade.db"
+            )
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "d0e1f2a3b4c5")
+                prior_engine = create_engine(database_url)
+                try:
+                    with prior_engine.begin() as connection:
+                        connection.execute(
+                            text(
+                                """
+                                INSERT INTO analysis_runs (
+                                    id,
+                                    document_version_id,
+                                    entity_type_scope,
+                                    analysis_method,
+                                    analysis_method_version,
+                                    software_version,
+                                    configuration,
+                                    configuration_hash,
+                                    input_schema_version,
+                                    input_manifest,
+                                    input_fingerprint,
+                                    status,
+                                    created_at
+                                ) VALUES (
+                                    4,
+                                    999,
+                                    'all',
+                                    'historical-method',
+                                    '0.1.0',
+                                    :software_version,
+                                    '{}',
+                                    :configuration_hash,
+                                    'document-analysis-input@2',
+                                    :input_manifest,
+                                    :input_fingerprint,
+                                    'prepared',
+                                    CURRENT_TIMESTAMP
+                                )
+                                """
+                            ),
+                            {
+                                "software_version": "git:" + "a" * 40,
+                                "configuration_hash": "b" * 64,
+                                "input_manifest": (
+                                    '{"schema_version":'
+                                    '"document-analysis-input@2"}'
+                                ),
+                                "input_fingerprint": "c" * 64,
+                            },
+                        )
+                finally:
+                    prior_engine.dispose()
+                command.upgrade(config, "head")
+
+            result_engine = create_engine(database_url)
+            try:
+                with result_engine.connect() as connection:
+                    row = connection.execute(
+                        text(
+                            """
+                            SELECT
+                                id,
+                                status,
+                                attempt_count,
+                                last_error,
+                                started_at,
+                                finished_at
+                            FROM analysis_runs
+                            WHERE id = 4
+                            """
+                        )
+                    ).mappings().one()
+            finally:
+                result_engine.dispose()
+
+        self.assertEqual(row["id"], 4)
+        self.assertEqual(row["status"], "prepared")
+        self.assertEqual(row["attempt_count"], 0)
+        self.assertIsNone(row["last_error"])
+        self.assertIsNone(row["started_at"])
+        self.assertIsNone(row["finished_at"])
+
+    def test_analysis_execution_migration_downgrades_cleanly(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = (
+                Path(temporary_directory) / "analysis_execution_down.db"
+            )
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "head")
+                command.downgrade(config, "d0e1f2a3b4c5")
+
+            test_engine = create_engine(database_url)
+            try:
+                inspector = inspect(test_engine)
+                table_names = set(inspector.get_table_names())
+                run_columns = {
+                    column["name"]
+                    for column in inspector.get_columns("analysis_runs")
+                }
+            finally:
+                test_engine.dispose()
+
+        self.assertNotIn("analysis_results", table_names)
+        self.assertFalse({
+            "attempt_count",
+            "last_error",
+            "started_at",
+            "finished_at",
+        } & run_columns)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from unittest.mock import patch
 from sqlalchemy import func, select
 
 from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis.methods import AnalysisMethodRegistry
 from argus.knowledge import AliasDecisionStatus, EntityType
 from argus.models import AnalysisRun
 from argus.services.analysis_run_service import prepare_analysis_run
@@ -29,8 +30,16 @@ class AnalysisRunServiceTests(unittest.TestCase):
             ),
         )
         self.provenance_resolver = self.provenance_patcher.start()
+        method = _TestAnalysisMethod()
+        self.registry_patcher = patch(
+            "argus.services.analysis_run_service."
+            "default_analysis_method_registry",
+            return_value=AnalysisMethodRegistry((method,)),
+        )
+        self.registry_patcher.start()
 
     def tearDown(self) -> None:
+        self.registry_patcher.stop()
         self.provenance_patcher.stop()
         self.fixture.tearDown()
 
@@ -193,6 +202,22 @@ class AnalysisRunServiceTests(unittest.TestCase):
         )
         self.assertEqual(count, 0)
 
+    def test_unregistered_method_does_not_persist_run(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not registered"):
+            prepare_analysis_run(
+                document_version_id=self.fixture.version.id,
+                entity_type=EntityType.ORGANIZATION,
+                analysis_method="unknown",
+                analysis_method_version="1",
+                registry=AnalysisMethodRegistry(),
+                session_factory=self.fixture.session_factory,
+            )
+
+        count = self.fixture.session.scalar(
+            select(func.count()).select_from(AnalysisRun)
+        )
+        self.assertEqual(count, 0)
+
     def test_conflicting_stored_manifest_fails_closed(self) -> None:
         prepared = self._prepare()
         row = self.fixture.session.get(
@@ -221,3 +246,14 @@ class AnalysisRunServiceTests(unittest.TestCase):
             configuration=configuration,
             session_factory=self.fixture.session_factory,
         )
+
+
+class _TestAnalysisMethod:
+    name = "rhetoric-signals"
+    version = "1.2.0"
+
+    def validate(self, *, input_manifest, configuration) -> None:
+        return None
+
+    def execute(self, *, text, input_manifest, configuration):
+        raise AssertionError("Preparation must not execute the method.")

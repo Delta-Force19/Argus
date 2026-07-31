@@ -73,15 +73,19 @@ For example, these are separate processing states:
 ```text
 article=42, stage=discourse, method=lexical-en-v0.1
 article=42, stage=discourse, method=lexical-en-v0.2
+```
+
 A completed result from one method version must not block execution of another
 version.
 
-Lifecycle
+## Lifecycle
 
 The expected lifecycle is:
 
-pending → running → done
-                  ↘ failed
+```text
+pending -> running -> done
+                   -> failed
+```
 
 When a state becomes running:
 
@@ -104,7 +108,7 @@ The repository currently provides lifecycle operations, but the database does
 not enforce transition order. Transition validation may be added if concurrent
 or distributed workers require stronger guarantees.
 
-Retry Behaviour
+## Retry Behaviour
 
 Failed operations are excluded from normal processing.
 
@@ -120,7 +124,7 @@ the operation is executed again.
 
 Retries remain associated with the same stage and method version.
 
-Method Versions
+## Method Versions
 
 Method versions identify the implementation that produced a processing state
 or analytical result.
@@ -136,7 +140,7 @@ when a processing change can alter results.
 Refactoring that provably preserves output does not automatically require a new
 method version.
 
-Transaction Behaviour
+## Transaction Behaviour
 
 Processing-state transitions are currently committed explicitly by
 ProcessingStateRepository.
@@ -150,17 +154,29 @@ entire managed session scope.
 Transaction ownership may later move to a service-level unit of work. Such a
 change must preserve per-article failure isolation.
 
-Current Limitation
+## Analysis-run execution
+
+The document-native analytical boundary uses `AnalysisRun` rather than the
+legacy article `ProcessingState`. It has its own exact input fingerprint,
+software identity, method registry, attempt ledger and immutable
+`AnalysisResult`. The initial executable pair is
+`lexical-discourse@lexical-en-v0.1`.
+
+Execution claims are atomic, but no worker lease is recorded. A process death
+after the committed `running` claim can therefore leave that run blocked. This
+is visible state and must not be reset implicitly.
+
+## Current Limitation
 
 A process interrupted while a state is running may leave that state blocked.
 
 Argus does not yet implement:
 
-worker leases;
-execution ownership;
-heartbeat timestamps;
-stale-running recovery;
-concurrent claim locking.
+- worker leases;
+- execution ownership;
+- heartbeat timestamps;
+- stale-running recovery;
+- distributed claim coordination.
 
 These mechanisms should be introduced before parallel or distributed workers
 are enabled.

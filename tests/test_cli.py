@@ -111,6 +111,10 @@ from argus.services.document_analysis_input_service import (
 )
 from argus.analysis_runs import AnalysisRunStatus
 from argus.services.analysis_run_service import PreparedAnalysisRun
+from argus.services.analysis_execution_service import (
+    AnalysisRunResultView,
+    ExecutedAnalysisRun,
+)
 from argus.documents import DerivedArtifactType, DocumentType
 from argus.services.latest_news_service import (
     LatestNewsItem,
@@ -133,6 +137,115 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.get_analysis_run_result")
+    def test_analysis_result_prints_hash_verified_payload(
+            self,
+            get_analysis_run_result,
+    ) -> None:
+        get_analysis_run_result.return_value = AnalysisRunResultView(
+            analysis_run_id=92,
+            analysis_result_id=17,
+            status=AnalysisRunStatus.COMPLETED,
+            attempt_count=1,
+            analysis_method="lexical-discourse",
+            analysis_method_version="lexical-en-v0.1",
+            software_version="git:" + "a" * 40,
+            result_schema_version="lexical-discourse-result@1",
+            output_hash="b" * 64,
+            payload={"metrics": {"word_count": 4}},
+            warnings=("Input limitation.",),
+        )
+
+        result = runner.invoke(
+            app,
+            ["analysis-result", "--analysis-run-id", "92"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_analysis_run_result.assert_called_once_with(
+            analysis_run_id=92,
+        )
+        self.assertIn(
+            'payload={"metrics":{"word_count":4}}',
+            result.stdout,
+        )
+        self.assertIn("warning='Input limitation.'", result.stdout)
+
+    @patch("argus.interface.cli.execute_analysis_run")
+    def test_execute_analysis_prints_immutable_result(
+            self,
+            execute_analysis_run,
+    ) -> None:
+        execute_analysis_run.return_value = ExecutedAnalysisRun(
+            analysis_run_id=92,
+            analysis_result_id=17,
+            executed=True,
+            status=AnalysisRunStatus.COMPLETED,
+            attempt_count=1,
+            analysis_method="lexical-discourse",
+            analysis_method_version="lexical-en-v0.1",
+            software_version="git:" + "a" * 40,
+            result_schema_version="lexical-discourse-result@1",
+            output_hash="b" * 64,
+            warning_count=0,
+        )
+
+        result = runner.invoke(
+            app,
+            ["execute-analysis", "--analysis-run-id", "92"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        execute_analysis_run.assert_called_once_with(
+            analysis_run_id=92,
+            retry_failed=False,
+        )
+        self.assertIn(
+            "analysis_run_id=92 analysis_result_id=17 "
+            "executed=true status=completed attempts=1",
+            result.stdout,
+        )
+        self.assertIn(
+            f"result_schema=lexical-discourse-result@1 "
+            f"output_hash={'b' * 64} warnings=0",
+            result.stdout,
+        )
+
+    @patch("argus.interface.cli.execute_analysis_run")
+    def test_execute_analysis_passes_explicit_retry(
+            self,
+            execute_analysis_run,
+    ) -> None:
+        execute_analysis_run.return_value = ExecutedAnalysisRun(
+            analysis_run_id=92,
+            analysis_result_id=17,
+            executed=False,
+            status=AnalysisRunStatus.COMPLETED,
+            attempt_count=2,
+            analysis_method="lexical-discourse",
+            analysis_method_version="lexical-en-v0.1",
+            software_version="git:" + "a" * 40,
+            result_schema_version="lexical-discourse-result@1",
+            output_hash="b" * 64,
+            warning_count=1,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "execute-analysis",
+                "--analysis-run-id",
+                "92",
+                "--retry-failed",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        execute_analysis_run.assert_called_once_with(
+            analysis_run_id=92,
+            retry_failed=True,
+        )
+
     @patch("argus.interface.cli.prepare_analysis_run")
     def test_prepare_analysis_persists_reproducible_contract(
             self,
