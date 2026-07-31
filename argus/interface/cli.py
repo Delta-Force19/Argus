@@ -1419,11 +1419,6 @@ def prepare_analysis(
             "--method-version",
             help="Exact analytical method version.",
         ),
-        software_version: str = typer.Option(
-            ...,
-            "--software-version",
-            help="Exact Argus/software build identifier.",
-        ),
         configuration_json: str = typer.Option(
             "{}",
             "--configuration-json",
@@ -1452,7 +1447,6 @@ def prepare_analysis(
         document_version_id=document_version_id,
         analysis_method=analysis_method,
         analysis_method_version=analysis_method_version,
-        software_version=software_version,
         configuration=configuration,
         entity_type=entity_type,
     )

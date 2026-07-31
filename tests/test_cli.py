@@ -146,7 +146,7 @@ class CLITests(unittest.TestCase):
             entity_type_scope="organization",
             analysis_method="rhetoric-signals",
             analysis_method_version="1.2.0",
-            software_version="5b07cbd",
+            software_version="git:" + "a" * 40,
             configuration={"threshold": 0.75},
             configuration_hash="a" * 64,
             input_schema_version="document-analysis-input@1",
@@ -168,8 +168,6 @@ class CLITests(unittest.TestCase):
                 "rhetoric-signals",
                 "--method-version",
                 "1.2.0",
-                "--software-version",
-                "5b07cbd",
                 "--configuration-json",
                 '{"threshold": 0.75}',
             ],
@@ -180,7 +178,6 @@ class CLITests(unittest.TestCase):
             document_version_id=21,
             analysis_method="rhetoric-signals",
             analysis_method_version="1.2.0",
-            software_version="5b07cbd",
             configuration={"threshold": 0.75},
             entity_type=EntityType.ORGANIZATION,
         )
@@ -207,8 +204,6 @@ class CLITests(unittest.TestCase):
                 "rhetoric-signals",
                 "--method-version",
                 "1",
-                "--software-version",
-                "5b07cbd",
                 "--configuration-json",
                 "[]",
             ],
@@ -219,6 +214,30 @@ class CLITests(unittest.TestCase):
             "configuration-json must contain one JSON object",
             result.output,
         )
+
+    @patch("argus.interface.cli.prepare_analysis_run")
+    def test_prepare_analysis_rejects_manual_software_version(
+            self,
+            prepare_analysis_run,
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "prepare-analysis",
+                "--document-version-id",
+                "21",
+                "--method",
+                "rhetoric-signals",
+                "--method-version",
+                "1",
+                "--software-version",
+                "spoofed",
+            ],
+        )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("No such option", result.output)
+        prepare_analysis_run.assert_not_called()
 
     @patch("argus.interface.cli.resolve_candidate_identity")
     def test_resolve_candidate_records_explicit_scoped_decision(

@@ -1073,7 +1073,7 @@ Each row stores:
 
 - the exact `DocumentVersion` and entity-type scope;
 - analytical method and method version;
-- Argus or calling-software version;
+- automatically verified Argus software version;
 - canonical JSON configuration and its SHA-256 digest;
 - input-manifest schema version;
 - canonical input manifest and its SHA-256 fingerprint;
@@ -1094,3 +1094,13 @@ run even with the same input; a registry or provenance change creates a
 distinct input fingerprint. Analytical outputs do not yet exist in this
 foundation and must later reference the prepared run rather than silently
 reconstructing their own input boundary.
+
+Software identity is not accepted from the caller. A clean Git checkout stores
+`git:<full-commit-sha>` and refuses preparation when tracked, staged or
+untracked files differ from the commit. An unpacked distribution without
+`.git` stores `source-sha256:<source-tree-digest>`, calculated over the actual
+Argus package, migrations, entrypoint, dependency lock and Alembic
+configuration. Existing but unusable Git metadata is an error rather than a
+reason to downgrade to content-hash provenance. Both forms are self-describing
+and fit the existing `software_version` field and reproducible key, so this
+contract requires no schema migration.

@@ -13,6 +13,9 @@ from argus.services.document_analysis_input_service import (
     DocumentAnalysisInputBundle,
     build_document_analysis_input,
 )
+from argus.services.software_provenance_service import (
+    resolve_software_provenance,
+)
 from argus.storage.analysis_run_repository import AnalysisRunRepository
 
 
@@ -46,7 +49,6 @@ def prepare_analysis_run(
         document_version_id: int,
         analysis_method: str,
         analysis_method_version: str,
-        software_version: str,
         configuration: Mapping[str, object] | None = None,
         entity_type: EntityType | None = None,
         session_factory: Callable[[], Session] = SessionLocal,
@@ -63,11 +65,8 @@ def prepare_analysis_run(
         field="analysis_method_version",
         maximum=100,
     )
-    normalized_software_version = _required_text(
-        software_version,
-        field="software_version",
-        maximum=100,
-    )
+    software_provenance = resolve_software_provenance()
+    normalized_software_version = software_provenance.software_version
     normalized_configuration = _canonical_json_object(
         {} if configuration is None else configuration,
         field="configuration",

@@ -717,7 +717,18 @@ input. It stores no new readiness, projection or bundle row.
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
 transaction. No analytical result is produced yet. The row records the exact
 document version and entity-type scope, analytical method and version,
-software version, canonical JSON configuration and its SHA-256 digest.
+automatically verified software version, canonical JSON configuration and its
+SHA-256 digest. The command accepts no caller-supplied software version.
+
+In a Git checkout, preparation requires a completely clean Argus worktree and
+records `git:<full-commit-sha>`. Tracked, staged and untracked changes all fail
+closed before a database transaction begins; ignored runtime databases, raw
+artifacts and logs do not make the worktree dirty. If the distributed source
+has no `.git` metadata, Argus hashes its actual package, migrations, entrypoint,
+dependency lock and Alembic configuration and records
+`source-sha256:<source-tree-digest>`. A broken or unverifiable `.git` directory
+never falls back to the source hash, so Git provenance cannot be silently
+downgraded.
 
 The input fingerprint is the SHA-256 digest of a canonical manifest containing
 the document and raw-artifact identities, text-artifact metadata and digest,
@@ -731,10 +742,10 @@ in the run table.
 Identical input, method, method version, software version and configuration
 reuse one prepared run. Any changed configuration receives a different
 configuration digest; any changed bundle evidence receives a different input
-fingerprint. A stored row that conflicts with its reproducible key is rejected
-fail-closed. The current lifecycle contains only `prepared`; execution,
-outputs, completion and failure will be added only with their own explicit
-contracts.
+fingerprint; any changed verified code identity receives a different run. A
+stored row that conflicts with its reproducible key is rejected fail-closed.
+The current lifecycle contains only `prepared`; execution, outputs, completion
+and failure will be added only with their own explicit contracts.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
