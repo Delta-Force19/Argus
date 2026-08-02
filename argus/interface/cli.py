@@ -17,6 +17,11 @@ from argus.analysis.corpus_builder import (
     verify_corpus_build,
     write_corpus_build,
 )
+from argus.analysis.corpus_intake import (
+    assemble_source_manifest,
+    register_human_source,
+    register_synthetic_source,
+)
 from argus.logging.logger import configure_logging
 from argus.services.acquisition_batch_runner import (
     AcquisitionBatchItemStatus,
@@ -1616,6 +1621,157 @@ def analysis_evidence(
                 separators=(",", ":"),
             )
         )
+
+
+@app.command()
+def register_human_corpus_source(
+        input_text: Path = typer.Option(
+            ..., "--input-text", exists=True, dir_okay=False, readable=True,
+            help="UTF-8 human-authored source text to preserve.",
+        ),
+        workspace_root: Path = typer.Option(
+            ..., "--workspace-root", file_okay=False,
+            help="Corpus intake root containing text, records and logs.",
+        ),
+        source_id: str = typer.Option(..., "--source-id"),
+        language: str = typer.Option(..., "--language"),
+        genre: str = typer.Option(..., "--genre"),
+        source_group_id: str = typer.Option(..., "--source-group-id"),
+        reference: str = typer.Option(
+            ..., "--reference", help="Preserved publication or archive reference.",
+        ),
+        retrieved_at: str = typer.Option(
+            ..., "--retrieved-at", help="RFC 3339 retrieval time with timezone.",
+        ),
+        acquisition_method: str = typer.Option(
+            ..., "--acquisition-method", help="How the exact text was acquired.",
+        ),
+) -> None:
+    """Register one provenance-supported human corpus source."""
+
+    result = register_human_source(
+        input_text,
+        workspace_root=workspace_root,
+        source_id=source_id,
+        language=language,
+        genre=genre,
+        source_group_id=source_group_id,
+        reference=reference,
+        retrieved_at=retrieved_at,
+        acquisition_method=acquisition_method,
+    )
+    typer.echo(
+        f"source_id={result.source_id!r} label={result.label} "
+        f"content_sha256={result.content_sha256}"
+    )
+    typer.echo(
+        f"text={str(result.text_path)!r} record={str(result.record_path)!r}"
+    )
+
+
+@app.command()
+def register_synthetic_corpus_source(
+        input_text: Path = typer.Option(
+            ..., "--input-text", exists=True, dir_okay=False, readable=True,
+            help="UTF-8 generated source text to preserve.",
+        ),
+        prompt_file: Path = typer.Option(
+            ..., "--prompt-file", exists=True, dir_okay=False, readable=True,
+            help="Exact UTF-8 prompt artifact used for generation.",
+        ),
+        workspace_root: Path = typer.Option(
+            ..., "--workspace-root", file_okay=False,
+            help="Corpus intake root containing text, records and logs.",
+        ),
+        source_id: str = typer.Option(..., "--source-id"),
+        language: str = typer.Option(..., "--language"),
+        genre: str = typer.Option(..., "--genre"),
+        source_group_id: str = typer.Option(..., "--source-group-id"),
+        generated_at: str = typer.Option(
+            ..., "--generated-at", help="RFC 3339 generation time with timezone.",
+        ),
+        provider: str = typer.Option(..., "--provider"),
+        model: str = typer.Option(..., "--model"),
+        model_version: str = typer.Option(..., "--model-version"),
+        generation_parameters_json: str = typer.Option(
+            "{}", "--generation-parameters-json",
+            help="Exact generation parameters as one JSON object.",
+        ),
+) -> None:
+    """Register generated text with its prompt and generation log."""
+
+    try:
+        parameters = json.loads(generation_parameters_json)
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter(
+            "generation-parameters-json must be valid JSON."
+        ) from error
+    if not isinstance(parameters, dict):
+        raise typer.BadParameter(
+            "generation-parameters-json must contain one JSON object."
+        )
+    result = register_synthetic_source(
+        input_text,
+        prompt_file,
+        workspace_root=workspace_root,
+        source_id=source_id,
+        language=language,
+        genre=genre,
+        source_group_id=source_group_id,
+        generated_at=generated_at,
+        provider=provider,
+        model=model,
+        model_version=model_version,
+        generation_parameters=parameters,
+    )
+    typer.echo(
+        f"source_id={result.source_id!r} label={result.label} "
+        f"content_sha256={result.content_sha256}"
+    )
+    typer.echo(
+        f"text={str(result.text_path)!r} prompt={str(result.prompt_path)!r} "
+        f"generation_log={str(result.generation_log_path)!r} "
+        f"record={str(result.record_path)!r}"
+    )
+
+
+@app.command()
+def assemble_synthetic_corpus_manifest(
+        workspace_root: Path = typer.Option(
+            ..., "--workspace-root", exists=True, file_okay=False, readable=True,
+            help="Corpus intake root containing registered source records.",
+        ),
+        output_jsonl: Path = typer.Option(
+            ..., "--output-jsonl", dir_okay=False,
+            help="New deterministic source-record manifest.",
+        ),
+        split_salt: str = typer.Option(
+            ..., "--split-salt",
+            help="Dataset/version salt used to validate group split assignment.",
+        ),
+        train_ratio: float = typer.Option(0.6, "--train-ratio", min=0.01, max=0.98),
+        calibration_ratio: float = typer.Option(
+            0.2, "--calibration-ratio", min=0.01, max=0.98,
+        ),
+) -> None:
+    """Assemble and validate registered records as one manifest."""
+
+    result = assemble_source_manifest(
+        workspace_root=workspace_root,
+        output_jsonl=output_jsonl,
+        split_salt=split_salt,
+        train_ratio=train_ratio,
+        calibration_ratio=calibration_ratio,
+    )
+    typer.echo(
+        f"schema={result['schema']!r} intake={result['intake_version']!r} "
+        f"records={result['records']} manifest_hash={result['manifest_hash']}"
+    )
+    typer.echo(
+        "labels=" + json.dumps(result["labels"], sort_keys=True)
+        + " splits=" + json.dumps(result["splits"], sort_keys=True)
+    )
+    typer.echo(f"output={str(output_jsonl)!r}")
 
 
 @app.command()

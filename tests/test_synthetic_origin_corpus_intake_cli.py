@@ -1,0 +1,77 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import unittest
+
+from typer.testing import CliRunner
+
+from argus.interface.cli import app
+
+
+runner = CliRunner()
+
+
+class SyntheticOriginCorpusIntakeCLITests(unittest.TestCase):
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_register_human_command_creates_source_and_record(
+            self, upgrade, configure) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.txt"
+            source.write_text("Affirmatively human source text.", encoding="utf-8")
+            workspace = root / "intake"
+            result = runner.invoke(app, [
+                "register-human-corpus-source",
+                "--input-text", str(source),
+                "--workspace-root", str(workspace),
+                "--source-id", "human-news-0001",
+                "--language", "en",
+                "--genre", "news",
+                "--source-group-id", "story-1",
+                "--reference", "https://example.test/story-1",
+                "--retrieved-at", "2026-08-02T10:00:00Z",
+                "--acquisition-method", "publisher-export",
+            ])
+
+            self.assertEqual(result.exit_code, 0, result.stdout)
+            self.assertTrue((workspace / "text/human/human-news-0001.txt").is_file())
+            self.assertTrue((workspace / "records/human-news-0001.json").is_file())
+        self.assertIn("label=human", result.stdout)
+        upgrade.assert_called_once_with()
+        configure.assert_called_once_with()
+
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_register_synthetic_command_rejects_non_object_parameters(
+            self, upgrade, configure) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.txt"
+            prompt = root / "prompt.txt"
+            source.write_text("Generated text.", encoding="utf-8")
+            prompt.write_text("Prompt.", encoding="utf-8")
+            result = runner.invoke(app, [
+                "register-synthetic-corpus-source",
+                "--input-text", str(source),
+                "--prompt-file", str(prompt),
+                "--workspace-root", str(root / "intake"),
+                "--source-id", "synthetic-news-0001",
+                "--language", "en",
+                "--genre", "news",
+                "--source-group-id", "prompt-1",
+                "--generated-at", "2026-08-02T10:00:00Z",
+                "--provider", "provider",
+                "--model", "model",
+                "--model-version", "snapshot",
+                "--generation-parameters-json", "[]",
+            ])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("must contain one JSON object", result.output)
+        upgrade.assert_called_once_with()
+        configure.assert_called_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()

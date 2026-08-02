@@ -818,6 +818,15 @@ the builder neither downloads human sources nor invokes a text generator. The
 read-only verifier reconstructs the canonical output from the preserved
 manifest and source files before accepting that receipt.
 
+Before the build, corpus intake registers human and synthetic sources through
+separate explicit paths. Human registration requires affirmative source
+provenance. Synthetic registration preserves the exact prompt and emits a
+self-hashed `synthetic-origin-generation-log@1` containing generator identity,
+version and parameters. Each registration creates an exact-byte text copy and
+one strict source-record sidecar without overwriting existing artifacts. The
+manifest assembler sorts those reviewed records and runs complete builder
+validation before publishing new JSONL bytes.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

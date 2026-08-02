@@ -1187,6 +1187,13 @@ content hashes, normalization and deduplication policy versions, salted
 group-split policy, resulting corpus and split hashes, and a self-verifying
 receipt hash. These are offline artifacts rather than database entities.
 
+The intake layer adds one preserved file contract,
+`synthetic-origin-generation-log@1`. It binds a synthetic sample to the exact
+prompt hash, output hash, provider, model, model snapshot, generation time and
+finite JSON parameters, and carries a canonical self-hash. Intake sidecars use
+the existing `synthetic-origin-source-record@1` contract; they are not a
+competing manifest schema or mutable database record.
+
 ### Analysis execution attempt
 
 `AnalysisExecutionAttempt` is the append-only audit record for one claimed

@@ -13,6 +13,11 @@ its label. The builder then verifies bytes, performs conservative
 normalization, rejects duplicates, assigns source groups to splits and emits a
 hash-bound receipt.
 
+Use `docs/analysis/synthetic_origin_corpus_intake.md` to register exact text,
+prompts and generation logs and assemble this manifest without manually
+calculating hashes. The builder remains independently usable with any manifest
+that satisfies the same contract.
+
 ## Source record contract
 
 Each manifest line is exactly one `synthetic-origin-source-record@1` object:

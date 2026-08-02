@@ -127,6 +127,12 @@ It emits a self-verifying build receipt. Automatic web collection and model
 generation are outside this builder so acquisition evidence cannot be silently
 collapsed into a label.
 
+Corpus intake automates preservation, not acquisition judgment. It can copy
+exact human or generated text, preserve prompts, hash artifacts, create
+generation logs and assemble strict manifests. It does not browse for human
+sources, call a generator, decide that an unknown text is human, or repair
+incomplete provenance.
+
 C2PA and media forensics follow only after image, audio and video artifacts
 have immutable input manifests and verifiable locator contracts. No detector
 may write a conclusion without exposing its evidence and uncertainty.

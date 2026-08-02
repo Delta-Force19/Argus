@@ -192,6 +192,13 @@ rejects duplicate contamination and assigns whole related-source groups with
 a versioned deterministic split policy. A hash-bound receipt makes each build
 auditable and repeatable.
 
+The preceding intake stage is explicit and create-only. Human registration
+preserves exact UTF-8 bytes with affirmative source provenance. Synthetic
+registration additionally preserves the exact prompt and a self-hashed
+generation log. A deterministic assembler turns reviewed sidecars into the
+strict builder manifest and invokes builder validation before the manifest
+becomes a release artifact.
+
 ## Current Limitation
 
 A process interrupted while a state is running may leave that state blocked.
