@@ -105,10 +105,17 @@ only when calibrated for the relevant language, genre, modality and input
 conditions; otherwise the value is a method-specific `detector_score` with
 explicit limitations.
 
-The first implementation target is experimental text analysis. C2PA and media
-forensics follow only after image, audio and video artifacts have immutable
-input manifests and verifiable locator contracts. No detector may write a
-conclusion without exposing its evidence and uncertainty.
+The first experimental text method is
+`synthetic-origin-text@structural-en-v0.1`. It exposes reproducible structural
+features and an explicitly uncalibrated `detector_score` only for sufficiently
+long English inputs. Its conclusion remains `inconclusive`, it never emits a
+`synthetic_probability`, and every local formulaic-language signal is stored
+as source-located evidence. This baseline is for exploratory ranking and
+contract validation, not authorship accusation.
+
+C2PA and media forensics follow only after image, audio and video artifacts
+have immutable input manifests and verifiable locator contracts. No detector
+may write a conclusion without exposing its evidence and uncertainty.
 
 ## Incremental implementation sequence
 

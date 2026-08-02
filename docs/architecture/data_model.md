@@ -1150,7 +1150,7 @@ The former `analysis_evidence` table belongs to the legacy article discourse
 pipeline and is preserved, without rewriting its rows, as
 `discourse_analysis_evidence`.
 
-The current registered method is
+One registered method is
 `lexical-discourse@lexical-en-v0.2`. It adapts the existing deterministic
 English lexical discourse analyzer, emits metrics in
 `lexical-discourse-result@2`, and writes every matched sentence separately as
@@ -1158,6 +1158,17 @@ English lexical discourse analyzer, emits metrics in
 languages and method configurations require their own explicit versions.
 Historical `lexical-en-v0.1` results remain readable with their original
 embedded evidence and hashes; coordinates are not fabricated retroactively.
+
+The first registered synthetic-origin method is
+`synthetic-origin-text@structural-en-v0.1`. Its
+`synthetic-origin-text-result@1` payload separates an uncalibrated
+`detector_score` from the reserved `synthetic_probability`, records
+eligibility, structural metrics and limitations, and always concludes
+`inconclusive`. It requires at least 250 words and 10 sentences before
+producing a score. Formulaic-language matches are weak local observations,
+stored as `synthetic-origin-text-evidence@1`; they are never represented as
+proof of synthetic authorship. The allowed conclusion vocabulary intentionally
+has no `verified_human` value.
 
 ### Analysis execution attempt
 

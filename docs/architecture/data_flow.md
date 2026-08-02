@@ -783,7 +783,7 @@ code version to match the historical run. It still verifies the run hashes,
 text artifact and output hash before emitting canonical JSON. This separates
 historical inspection from permission to execute old input under new code.
 
-The first executable method is
+The executable methods are
 `lexical-discourse@lexical-en-v0.2`, backed by the existing English lexical
 discourse analyzer. It accepts `{}` and emits
 `lexical-discourse-result@2` plus source-located
@@ -791,6 +791,15 @@ discourse analyzer. It accepts `{}` and emits
 not treated as an implementation merely because it appears in historical
 runs. `analysis-evidence` is the public read path for the ordered verified
 evidence set.
+
+`synthetic-origin-text@structural-en-v0.1` is the first experimental origin
+method. It accepts `{}` for English text, records whole-document structural
+metrics and emits local formulaic-language matches as
+`synthetic-origin-text-evidence@1`. Inputs shorter than 250 words or 10
+sentences are explicitly ineligible for scoring. Eligible inputs receive only
+an uncalibrated `detector_score`; every result remains `inconclusive`, carries
+limitations, and sets `synthetic_probability=null` and
+`probability_is_calibrated=false`.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication

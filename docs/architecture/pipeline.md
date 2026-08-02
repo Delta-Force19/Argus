@@ -159,9 +159,10 @@ change must preserve per-article failure isolation.
 The document-native analytical boundary uses `AnalysisRun` rather than the
 legacy article `ProcessingState`. It has its own exact input fingerprint,
 software identity, method registry, attempt ledger and immutable
-`AnalysisResult`. The current executable pair is
-`lexical-discourse@lexical-en-v0.2`; its result and ordered source-located
-`AnalysisEvidence` rows are one atomic write.
+`AnalysisResult`. The current executable methods are
+`lexical-discourse@lexical-en-v0.2` and the experimental
+`synthetic-origin-text@structural-en-v0.1`; each result and its ordered
+source-located `AnalysisEvidence` rows are one atomic write.
 
 Execution claims are atomic and append an `AnalysisExecutionAttempt`. A process
 death after the committed `running` claim remains visible and is never reset
@@ -173,6 +174,13 @@ Text evidence uses exact half-open character offsets into the immutable
 derived-text artifact. Its excerpt and content digest are revalidated when the
 result is read. Image, audio and video modalities are reserved in storage but
 remain fail-closed until their source manifests and locator validators exist.
+
+The structural synthetic-origin baseline is deliberately not a probability
+model. It can produce a bounded `detector_score` only for English inputs with
+at least 250 words and 10 sentences, always returns `inconclusive`, and records
+that the score is uncalibrated. A later method version may emit stronger
+conclusions only after evaluation data establishes language-, genre- and
+condition-specific calibration and error rates.
 
 ## Current Limitation
 

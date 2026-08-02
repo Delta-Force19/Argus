@@ -10,6 +10,7 @@ from argus.analysis.methods import (
     AnalysisMethodEvidence,
     AnalysisMethodOutput,
     AnalysisMethodRegistry,
+    SyntheticOriginTextMethod,
 )
 from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.knowledge import EntityType
@@ -190,6 +191,42 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
             self.assertFalse(attempt.migrated)
         finally:
             session.close()
+
+    def test_executes_uncalibrated_synthetic_origin_contract(self) -> None:
+        method = SyntheticOriginTextMethod()
+        registry = AnalysisMethodRegistry((method,))
+        prepared = prepare_analysis_run(
+            document_version_id=self.fixture.version.id,
+            entity_type=EntityType.ORGANIZATION,
+            analysis_method=method.name,
+            analysis_method_version=method.version,
+            configuration={},
+            registry=registry,
+            session_factory=self.fixture.session_factory,
+        )
+
+        executed = execute_analysis_run(
+            analysis_run_id=prepared.analysis_run_id,
+            registry=registry,
+            session_factory=self.fixture.session_factory,
+        )
+        result = get_analysis_run_result(
+            analysis_run_id=prepared.analysis_run_id,
+            session_factory=self.fixture.session_factory,
+        )
+
+        self.assertTrue(executed.executed)
+        self.assertEqual(
+            executed.result_schema_version,
+            "synthetic-origin-text-result@1",
+        )
+        self.assertEqual(result.payload["conclusion"], "inconclusive")
+        self.assertFalse(result.payload["eligible_for_scoring"])
+        self.assertIsNone(result.payload["detector_score"])
+        self.assertIsNone(result.payload["synthetic_probability"])
+        self.assertFalse(result.payload["probability_is_calibrated"])
+        self.assertEqual(result.evidence_count, 0)
+        self.assertEqual(len(result.evidence_set_hash), 64)
 
     def test_failure_is_audited_and_requires_explicit_retry(self) -> None:
         self.method.error = RuntimeError("model unavailable")
