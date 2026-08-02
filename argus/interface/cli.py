@@ -12,6 +12,11 @@ from argus.analysis.calibration import (
     load_calibration_corpus,
     write_canonical_json,
 )
+from argus.analysis.corpus_builder import (
+    build_corpus_from_manifest,
+    verify_corpus_build,
+    write_corpus_build,
+)
 from argus.logging.logger import configure_logging
 from argus.services.acquisition_batch_runner import (
     AcquisitionBatchItemStatus,
@@ -1611,6 +1616,121 @@ def analysis_evidence(
                 separators=(",", ":"),
             )
         )
+
+
+@app.command()
+def build_synthetic_corpus(
+        manifest_jsonl: Path = typer.Option(
+            ...,
+            "--manifest-jsonl",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Provenance-bearing source-record JSONL manifest.",
+        ),
+        source_root: Path = typer.Option(
+            ...,
+            "--source-root",
+            exists=True,
+            file_okay=False,
+            readable=True,
+            help="Root containing immutable UTF-8 source text files.",
+        ),
+        output_jsonl: Path = typer.Option(
+            ...,
+            "--output-jsonl",
+            dir_okay=False,
+            help="New calibration-corpus JSONL file.",
+        ),
+        receipt_json: Path = typer.Option(
+            ...,
+            "--receipt-json",
+            dir_okay=False,
+            help="New hash-bound corpus build receipt.",
+        ),
+        split_salt: str = typer.Option(
+            ...,
+            "--split-salt",
+            help="Stable public dataset/version salt for group split assignment.",
+        ),
+        train_ratio: float = typer.Option(
+            0.6,
+            "--train-ratio",
+            min=0.01,
+            max=0.98,
+            help="Deterministic train bucket share.",
+        ),
+        calibration_ratio: float = typer.Option(
+            0.2,
+            "--calibration-ratio",
+            min=0.01,
+            max=0.98,
+            help="Deterministic calibration bucket share.",
+        ),
+) -> None:
+    """Build a provenance-bound, deduplicated calibration corpus."""
+
+    build = build_corpus_from_manifest(
+        manifest_jsonl,
+        source_root=source_root,
+        split_salt=split_salt,
+        train_ratio=train_ratio,
+        calibration_ratio=calibration_ratio,
+    )
+    receipt = write_corpus_build(
+        build,
+        output_jsonl=output_jsonl,
+        receipt_json=receipt_json,
+    )
+    typer.echo(
+        f"schema={receipt['schema']!r} builder={receipt['builder_version']!r} "
+        f"sources={receipt['source_records']} groups={receipt['source_groups']}"
+    )
+    typer.echo(
+        "splits=" + json.dumps(receipt["splits"], sort_keys=True)
+        + f" corpus_hash={receipt['corpus_hash']}"
+    )
+    typer.echo(
+        f"receipt_hash={receipt['receipt_hash']} "
+        f"output={str(output_jsonl)!r} receipt={str(receipt_json)!r}"
+    )
+
+
+@app.command()
+def verify_synthetic_corpus_build(
+        manifest_jsonl: Path = typer.Option(
+            ..., "--manifest-jsonl", exists=True, dir_okay=False, readable=True,
+            help="Exact source-record manifest used for the build.",
+        ),
+        source_root: Path = typer.Option(
+            ..., "--source-root", exists=True, file_okay=False, readable=True,
+            help="Root containing the preserved source text files.",
+        ),
+        corpus_jsonl: Path = typer.Option(
+            ..., "--corpus-jsonl", exists=True, dir_okay=False, readable=True,
+            help="Built calibration corpus to reconstruct and verify.",
+        ),
+        receipt_json: Path = typer.Option(
+            ..., "--receipt-json", exists=True, dir_okay=False, readable=True,
+            help="Self-verifying build receipt.",
+        ),
+) -> None:
+    """Reconstruct and verify a corpus build without changing files."""
+
+    receipt = verify_corpus_build(
+        manifest_jsonl,
+        source_root=source_root,
+        corpus_path=corpus_jsonl,
+        receipt_path=receipt_json,
+    )
+    typer.echo(
+        f"verified=true schema={receipt['schema']!r} "
+        f"sources={receipt['source_records']} groups={receipt['source_groups']}"
+    )
+    typer.echo(
+        f"corpus_hash={receipt['corpus_hash']} "
+        f"receipt_hash={receipt['receipt_hash']}"
+    )
 
 
 @app.command()

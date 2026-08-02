@@ -15,6 +15,12 @@ The calibration harness keeps three concerns separate:
 
 ## Corpus contract
 
+For provenance-bound construction from source files, use
+`build-synthetic-corpus` as documented in
+`docs/analysis/synthetic_origin_corpus_building.md`. Directly authored corpus
+JSONL remains accepted for fixtures and externally governed datasets, but it
+does not by itself provide the builder receipt or source-byte verification.
+
 The corpus is UTF-8 JSONL. Every line is exactly one
 `synthetic-origin-calibration-sample@1` object with these fields:
 

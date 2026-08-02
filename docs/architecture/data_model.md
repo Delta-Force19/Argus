@@ -1179,6 +1179,14 @@ and calibration split; a `synthetic-origin-evaluation@1` report binds held-out
 metrics to the same corpus and untouched test split. This prevents benchmark
 experiments from being mistaken for analysis of collected documents.
 
+Corpus construction uses two additional file contracts.
+`synthetic-origin-source-record@1` binds one label and its required provenance
+to the SHA-256 of one immutable UTF-8 source file.
+`synthetic-origin-corpus-build@1` records the canonical manifest hash, source
+content hashes, normalization and deduplication policy versions, salted
+group-split policy, resulting corpus and split hashes, and a self-verifying
+receipt hash. These are offline artifacts rather than database entities.
+
 ### Analysis execution attempt
 
 `AnalysisExecutionAttempt` is the append-only audit record for one claimed

@@ -808,6 +808,16 @@ hash-bound threshold decision, then evaluate that unchanged decision on
 publishes false-positive and false-negative rates, uncertainty intervals and
 language/genre slices, but does not alter operational analysis conclusions.
 
+The labelled corpus can be produced by the offline
+`build-synthetic-corpus` path. It verifies an exact source-file SHA-256 and
+label-specific provenance for every manifest record, applies versioned
+conservative text normalization, rejects canonical and near duplicates, and
+assigns whole source groups by a deterministic salted hash. The emitted build
+receipt binds source hashes, policies, corpus identity and split identities;
+the builder neither downloads human sources nor invokes a text generator. The
+read-only verifier reconstructs the canonical output from the preserved
+manifest and source files before accepting that receipt.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and

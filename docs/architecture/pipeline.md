@@ -185,6 +185,13 @@ measures held-out errors overall and by language and genre. A later method
 version may emit stronger conclusions only after those reports establish
 condition-specific calibration and acceptable false-positive rates.
 
+Before calibration, the offline corpus builder converts a strict source
+manifest and preserved UTF-8 files into that JSONL contract. It verifies exact
+bytes and label-specific provenance, normalizes without changing source files,
+rejects duplicate contamination and assigns whole related-source groups with
+a versioned deterministic split policy. A hash-bound receipt makes each build
+auditable and repeatable.
+
 ## Current Limitation
 
 A process interrupted while a state is running may leave that state blocked.

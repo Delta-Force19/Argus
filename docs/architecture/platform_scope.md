@@ -120,6 +120,13 @@ held-out false-positive rates overall and by represented genre. The harness
 does not turn the current score into a probability or enable stronger runtime
 conclusions automatically.
 
+An offline corpus builder accepts only hash-matched source files with
+label-specific provenance, uses versioned conservative normalization and
+duplicate guards, and assigns complete source groups to deterministic splits.
+It emits a self-verifying build receipt. Automatic web collection and model
+generation are outside this builder so acquisition evidence cannot be silently
+collapsed into a label.
+
 C2PA and media forensics follow only after image, audio and video artifacts
 have immutable input manifests and verifiable locator contracts. No detector
 may write a conclusion without exposing its evidence and uncertainty.
