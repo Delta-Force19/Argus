@@ -1360,6 +1360,13 @@ class AnalysisResult(Base):
             "length(output_hash) = 64",
             name="ck_analysis_results_output_hash_sha256",
         ),
+        CheckConstraint(
+            (
+                "evidence_set_hash IS NULL "
+                "OR length(evidence_set_hash) = 64"
+            ),
+            name="ck_analysis_results_evidence_set_hash_sha256",
+        ),
         UniqueConstraint(
             "analysis_run_id",
             name="uq_analysis_results_analysis_run_id",
@@ -1389,6 +1396,76 @@ class AnalysisResult(Base):
         default=list,
     )
     output_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    evidence_set_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        nullable=False,
+    )
+
+
+class AnalysisEvidence(Base):
+    """One immutable, content-addressed observation for a result."""
+
+    __tablename__ = "analysis_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "evidence_index >= 0",
+            name="ck_analysis_evidence_index_non_negative",
+        ),
+        CheckConstraint(
+            "length(evidence_hash) = 64",
+            name="ck_analysis_evidence_hash_sha256",
+        ),
+        CheckConstraint(
+            "modality IN ('text', 'image', 'audio', 'video')",
+            name="ck_analysis_evidence_modality",
+        ),
+        UniqueConstraint(
+            "analysis_result_id",
+            "evidence_index",
+            name="uq_analysis_evidence_result_index",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analysis_result_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "analysis_results.id",
+            name=(
+                "fk_analysis_evidence_analysis_result_id_"
+                "analysis_results"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    evidence_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_schema_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    category: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    modality: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+    )
+    locator: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    evidence_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
         index=True,
@@ -1987,8 +2064,10 @@ class DiscourseAnalysisResult(Base):
     )
 
 
-class AnalysisEvidence(Base):
-    __tablename__ = "analysis_evidence"
+class DiscourseAnalysisEvidence(Base):
+    """Legacy evidence owned by the pre-AnalysisRun discourse pipeline."""
+
+    __tablename__ = "discourse_analysis_evidence"
 
     id: Mapped[int] = mapped_column(
         Integer,

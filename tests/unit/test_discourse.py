@@ -53,8 +53,11 @@ def test_lexicon_metrics_include_evidence(
     }
 
     assert evidence_by_category[EvidenceCategory.CERTAINTY].matched_terms == ["must"]
+    assert evidence_by_category[EvidenceCategory.CERTAINTY].start_char == 0
+    assert evidence_by_category[EvidenceCategory.CERTAINTY].end_char == 28
 
     assert evidence_by_category[EvidenceCategory.UNCERTAINTY].matched_terms == ["may"]
+    assert evidence_by_category[EvidenceCategory.UNCERTAINTY].start_char == 29
 
     assert evidence_by_category[EvidenceCategory.THREAT].matched_terms == ["attack"]
 

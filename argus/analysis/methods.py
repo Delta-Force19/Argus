@@ -1,13 +1,26 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Protocol
 
 from argus.analysis.discourse_analyzer import DiscourseAnalyzer
-from argus.processing import DISCOURSE_METHOD_VERSION
 
 
 LEXICAL_DISCOURSE_METHOD = "lexical-discourse"
-LEXICAL_DISCOURSE_RESULT_SCHEMA = "lexical-discourse-result@1"
+LEXICAL_DISCOURSE_METHOD_VERSION = "lexical-en-v0.2"
+LEXICAL_DISCOURSE_RESULT_SCHEMA = "lexical-discourse-result@2"
+LEXICAL_DISCOURSE_EVIDENCE_SCHEMA = "lexical-discourse-evidence@1"
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisMethodEvidence:
+    """One JSON-compatible, source-located analytical observation."""
+
+    evidence_schema_version: str
+    category: str
+    modality: str
+    locator: Mapping[str, object]
+    payload: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +30,7 @@ class AnalysisMethodOutput:
     result_schema_version: str
     payload: Mapping[str, object]
     warnings: tuple[str, ...] = ()
+    evidence: tuple[AnalysisMethodEvidence, ...] = ()
 
 
 class AnalysisMethod(Protocol):
@@ -45,7 +59,7 @@ class LexicalDiscourseMethod:
     """Adapt the existing deterministic English analyzer to AnalysisRun."""
 
     name = LEXICAL_DISCOURSE_METHOD
-    version = DISCOURSE_METHOD_VERSION
+    version = LEXICAL_DISCOURSE_METHOD_VERSION
 
     def __init__(self, analyzer: DiscourseAnalyzer | None = None) -> None:
         self._analyzer = analyzer
@@ -86,6 +100,12 @@ class LexicalDiscourseMethod:
 
         analyzer = self._analyzer or DiscourseAnalyzer()
         metrics = analyzer.analyze(text)
+        text_manifest = input_manifest.get("text")
+        if not isinstance(text_manifest, dict):
+            raise ValueError("Analysis input text manifest is invalid.")
+        artifact_id = text_manifest.get("derived_artifact_id")
+        if not isinstance(artifact_id, int) or isinstance(artifact_id, bool):
+            raise ValueError("Analysis input text artifact id is invalid.")
         payload: dict[str, object] = {
             "metrics": {
                 "word_count": metrics.word_count,
@@ -110,18 +130,33 @@ class LexicalDiscourseMethod:
                 "fear_marker_count": metrics.fear_marker_count,
                 "threat_marker_count": metrics.threat_marker_count,
             },
-            "evidence": [
-                {
-                    "category": item.category.value,
-                    "sentence": item.sentence,
-                    "matched_terms": list(item.matched_terms),
-                }
-                for item in metrics.evidence
-            ],
         }
         return AnalysisMethodOutput(
             result_schema_version=LEXICAL_DISCOURSE_RESULT_SCHEMA,
             payload=payload,
+            evidence=tuple(
+                AnalysisMethodEvidence(
+                    evidence_schema_version=(
+                        LEXICAL_DISCOURSE_EVIDENCE_SCHEMA
+                    ),
+                    category=item.category.value,
+                    modality="text",
+                    locator={
+                        "type": "text_span",
+                        "derived_artifact_id": artifact_id,
+                        "start_char": item.start_char,
+                        "end_char": item.end_char,
+                        "content_sha256": sha256(
+                            item.sentence.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                    payload={
+                        "excerpt": item.sentence,
+                        "matched_terms": list(item.matched_terms),
+                    },
+                )
+                for item in metrics.evidence
+            ),
         )
 
 

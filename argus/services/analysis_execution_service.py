@@ -8,13 +8,19 @@ from sqlalchemy.orm import Session
 
 from argus.analysis.methods import (
     AnalysisMethodRegistry,
+    AnalysisMethodEvidence,
     AnalysisMethodOutput,
     default_analysis_method_registry,
 )
 from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.database import SessionLocal
 from argus.documents import DerivedArtifactType
-from argus.models import AnalysisResult, AnalysisRun, DerivedArtifact
+from argus.models import (
+    AnalysisEvidence,
+    AnalysisResult,
+    AnalysisRun,
+    DerivedArtifact,
+)
 from argus.services.software_provenance_service import (
     resolve_software_provenance,
 )
@@ -36,6 +42,7 @@ class ExecutedAnalysisRun:
     result_schema_version: str
     output_hash: str
     warning_count: int
+    evidence_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +58,8 @@ class AnalysisRunResultView:
     software_version: str
     result_schema_version: str
     output_hash: str
+    evidence_set_hash: str | None
+    evidence_count: int
     payload: dict[str, object]
     warnings: tuple[str, ...]
 
@@ -90,6 +99,30 @@ class AnalysisAttemptHistory:
     status: AnalysisRunStatus
     attempt_count: int
     attempts: tuple[AnalysisAttemptView, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisEvidenceView:
+    """Detached, hash-verified evidence row with a source locator."""
+
+    evidence_id: int
+    evidence_index: int
+    evidence_schema_version: str
+    category: str
+    modality: str
+    locator: dict[str, object]
+    payload: dict[str, object]
+    evidence_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisEvidenceSet:
+    """One result identity and its ordered verified evidence set."""
+
+    analysis_run_id: int
+    analysis_result_id: int
+    evidence_set_hash: str | None
+    evidence: tuple[AnalysisEvidenceView, ...]
 
 
 class AnalysisExecutionFailed(RuntimeError):
@@ -229,8 +262,14 @@ def execute_analysis_run(
         _validate_persisted_run_integrity(run)
         existing = repository.get_result(run.id)
         if run.status is AnalysisRunStatus.COMPLETED:
-            _load_verified_text(session, run)
-            return _completed_result(run, existing, executed=False)
+            text = _load_verified_text(session, run)
+            return _completed_result(
+                run,
+                existing,
+                repository=repository,
+                text=text,
+                executed=False,
+            )
         if existing is not None:
             raise ValueError(
                 "Non-completed analysis run already has a result."
@@ -316,9 +355,15 @@ def get_analysis_run_result(
                 f"run status is {run.status.value}."
             )
         _validate_persisted_run_integrity(run)
-        _load_verified_text(session, run)
         result = repository.get_result(run.id)
-        completed = _completed_result(run, result, executed=False)
+        text = _load_verified_text(session, run)
+        completed = _completed_result(
+            run,
+            result,
+            repository=repository,
+            text=text,
+            executed=False,
+        )
         return AnalysisRunResultView(
             analysis_run_id=completed.analysis_run_id,
             analysis_result_id=completed.analysis_result_id,
@@ -329,8 +374,50 @@ def get_analysis_run_result(
             software_version=completed.software_version,
             result_schema_version=completed.result_schema_version,
             output_hash=completed.output_hash,
+            evidence_set_hash=result.evidence_set_hash,
+            evidence_count=completed.evidence_count,
             payload=_json_object(result.payload, field="result payload"),
             warnings=tuple(_warnings(result.warnings)),
+        )
+
+
+def get_analysis_evidence(
+        *,
+        analysis_run_id: int,
+        session_factory: Callable[[], Session] = SessionLocal,
+) -> AnalysisEvidenceSet:
+    """Return ordered evidence after verifying hashes and source locators."""
+
+    if analysis_run_id < 1:
+        raise ValueError("analysis_run_id must be greater than zero.")
+    with session_factory() as session:
+        repository = AnalysisRunRepository(session)
+        run = repository.get_by_id(analysis_run_id)
+        if run is None:
+            raise ValueError(
+                f"Analysis run does not exist: {analysis_run_id}."
+            )
+        if run.status is not AnalysisRunStatus.COMPLETED:
+            raise ValueError(
+                "Analysis evidence is unavailable: "
+                f"run status is {run.status.value}."
+            )
+        _validate_persisted_run_integrity(run)
+        text = _load_verified_text(session, run)
+        result = repository.get_result(run.id)
+        completed = _completed_result(
+            run,
+            result,
+            repository=repository,
+            text=text,
+            executed=False,
+        )
+        rows = repository.list_evidence(completed.analysis_result_id)
+        return AnalysisEvidenceSet(
+            analysis_run_id=run.id,
+            analysis_result_id=completed.analysis_result_id,
+            evidence_set_hash=result.evidence_set_hash,
+            evidence=tuple(_evidence_view(row) for row in rows),
         )
 
 
@@ -342,10 +429,14 @@ def _persist_success(
 ) -> ExecutedAnalysisRun:
     payload = _json_object(output.payload, field="result payload")
     warnings = _warnings(output.warnings)
+    evidence = list(output.evidence)
+    evidence_hashes = [_method_evidence_hash(item) for item in evidence]
+    evidence_set_hash = _json_hash(evidence_hashes)
     result_hash = _json_hash({
         "result_schema_version": output.result_schema_version,
         "payload": payload,
         "warnings": warnings,
+        "evidence_set_hash": evidence_set_hash,
     })
     with session_factory() as session:
         try:
@@ -365,9 +456,34 @@ def _persist_success(
                 payload=payload,
                 warnings=warnings,
                 output_hash=result_hash,
+                evidence_set_hash=evidence_set_hash,
             )
+            for index, item in enumerate(evidence):
+                repository.create_evidence(
+                    analysis_result_id=result.id,
+                    evidence_index=index,
+                    evidence_schema_version=item.evidence_schema_version,
+                    category=item.category,
+                    modality=item.modality,
+                    locator=_json_object(
+                        item.locator,
+                        field="evidence locator",
+                    ),
+                    payload=_json_object(
+                        item.payload,
+                        field="evidence payload",
+                    ),
+                    evidence_hash=evidence_hashes[index],
+                )
             repository.mark_completed(run, finished_at=_utc_now())
-            detached = _completed_result(run, result, executed=True)
+            text = _load_verified_text(session, run)
+            detached = _completed_result(
+                run,
+                result,
+                repository=repository,
+                text=text,
+                executed=True,
+            )
             session.commit()
             return detached
         except Exception:
@@ -460,6 +576,10 @@ def _normalize_output(output: AnalysisMethodOutput) -> AnalysisMethodOutput:
         result_schema_version=schema,
         payload=_json_object(output.payload, field="result payload"),
         warnings=tuple(_warnings(output.warnings)),
+        evidence=tuple(
+            _normalize_method_evidence(item)
+            for item in output.evidence
+        ),
     )
 
 
@@ -467,6 +587,8 @@ def _completed_result(
         run: AnalysisRun,
         result: AnalysisResult | None,
         *,
+        repository: AnalysisRunRepository,
+        text: str,
         executed: bool,
 ) -> ExecutedAnalysisRun:
     if result is None:
@@ -479,11 +601,31 @@ def _completed_result(
         or run.last_error is not None
     ):
         raise ValueError("Completed analysis run lifecycle is inconsistent.")
-    expected_hash = _json_hash({
-        "result_schema_version": result.result_schema_version,
-        "payload": result.payload,
-        "warnings": result.warnings,
-    })
+    evidence_rows = repository.list_evidence(result.id)
+    if result.evidence_set_hash is None:
+        if evidence_rows:
+            raise ValueError(
+                "Legacy analysis result unexpectedly has external evidence."
+            )
+        expected_hash = _json_hash({
+            "result_schema_version": result.result_schema_version,
+            "payload": result.payload,
+            "warnings": result.warnings,
+        })
+    else:
+        evidence_hashes = _verify_evidence_rows(
+            evidence_rows,
+            run=run,
+            text=text,
+        )
+        if _json_hash(evidence_hashes) != result.evidence_set_hash:
+            raise ValueError("Stored evidence set hash is inconsistent.")
+        expected_hash = _json_hash({
+            "result_schema_version": result.result_schema_version,
+            "payload": result.payload,
+            "warnings": result.warnings,
+            "evidence_set_hash": result.evidence_set_hash,
+        })
     if expected_hash != result.output_hash:
         raise ValueError("Stored analysis result hash is inconsistent.")
     return ExecutedAnalysisRun(
@@ -498,6 +640,144 @@ def _completed_result(
         result_schema_version=result.result_schema_version,
         output_hash=result.output_hash,
         warning_count=len(result.warnings),
+        evidence_count=len(evidence_rows),
+    )
+
+
+def _normalize_method_evidence(
+        item: AnalysisMethodEvidence,
+) -> AnalysisMethodEvidence:
+    if not isinstance(item, AnalysisMethodEvidence):
+        raise ValueError(
+            "evidence must contain AnalysisMethodEvidence values."
+        )
+    schema = item.evidence_schema_version.strip()
+    category = item.category.strip()
+    modality = item.modality.strip().lower()
+    if not schema or len(schema) > 100:
+        raise ValueError("evidence_schema_version is invalid.")
+    if not category or len(category) > 100:
+        raise ValueError("evidence category is invalid.")
+    if modality not in {"text", "image", "audio", "video"}:
+        raise ValueError("evidence modality is invalid.")
+    if modality != "text":
+        raise ValueError(
+            "The current document input contract supports only text evidence."
+        )
+    return AnalysisMethodEvidence(
+        evidence_schema_version=schema,
+        category=category,
+        modality=modality,
+        locator=_json_object(item.locator, field="evidence locator"),
+        payload=_json_object(item.payload, field="evidence payload"),
+    )
+
+
+def _method_evidence_hash(item: AnalysisMethodEvidence) -> str:
+    return _json_hash({
+        "evidence_schema_version": item.evidence_schema_version,
+        "category": item.category,
+        "modality": item.modality,
+        "locator": item.locator,
+        "payload": item.payload,
+    })
+
+
+def _verify_evidence_rows(
+        rows: Sequence[AnalysisEvidence],
+        *,
+        run: AnalysisRun,
+        text: str,
+) -> list[str]:
+    hashes: list[str] = []
+    for expected_index, row in enumerate(rows):
+        if row.evidence_index != expected_index:
+            raise ValueError("Stored analysis evidence order is incomplete.")
+        view = _evidence_view(row)
+        expected_hash = _json_hash({
+            "evidence_schema_version": view.evidence_schema_version,
+            "category": view.category,
+            "modality": view.modality,
+            "locator": view.locator,
+            "payload": view.payload,
+        })
+        if expected_hash != row.evidence_hash:
+            raise ValueError("Stored analysis evidence hash is inconsistent.")
+        if view.modality != "text":
+            raise ValueError(
+                "Current analysis input cannot verify non-text evidence."
+            )
+        _verify_text_locator(
+            locator=view.locator,
+            payload=view.payload,
+            run=run,
+            text=text,
+        )
+        hashes.append(row.evidence_hash)
+    return hashes
+
+
+def _verify_text_locator(
+        *,
+        locator: Mapping[str, object],
+        payload: Mapping[str, object],
+        run: AnalysisRun,
+        text: str,
+) -> None:
+    required = {
+        "type",
+        "derived_artifact_id",
+        "start_char",
+        "end_char",
+        "content_sha256",
+    }
+    if set(locator) != required or locator.get("type") != "text_span":
+        raise ValueError("Text evidence locator is invalid.")
+    manifest = _json_object(run.input_manifest, field="input_manifest")
+    text_manifest = manifest.get("text")
+    if not isinstance(text_manifest, dict):
+        raise ValueError("Analysis run text manifest is invalid.")
+    artifact_id = locator.get("derived_artifact_id")
+    start = locator.get("start_char")
+    end = locator.get("end_char")
+    content_hash = locator.get("content_sha256")
+    if (
+        not isinstance(artifact_id, int)
+        or isinstance(artifact_id, bool)
+        or artifact_id != text_manifest.get("derived_artifact_id")
+    ):
+        raise ValueError("Text evidence artifact is inconsistent.")
+    if (
+        not isinstance(start, int)
+        or isinstance(start, bool)
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or start < 0
+        or end <= start
+        or end > len(text)
+    ):
+        raise ValueError("Text evidence character range is invalid.")
+    excerpt = text[start:end]
+    if (
+        not isinstance(content_hash, str)
+        or len(content_hash) != 64
+        or sha256(excerpt.encode("utf-8")).hexdigest() != content_hash
+    ):
+        raise ValueError("Text evidence content hash is inconsistent.")
+    if payload.get("excerpt") != excerpt:
+        raise ValueError("Text evidence excerpt is inconsistent.")
+
+
+def _evidence_view(row: AnalysisEvidence) -> AnalysisEvidenceView:
+    return AnalysisEvidenceView(
+        evidence_id=row.id,
+        evidence_index=row.evidence_index,
+        evidence_schema_version=row.evidence_schema_version,
+        category=row.category,
+        modality=row.modality,
+        locator=_json_object(row.locator, field="evidence locator"),
+        payload=_json_object(row.payload, field="evidence payload"),
+        evidence_hash=row.evidence_hash,
     )
 
 

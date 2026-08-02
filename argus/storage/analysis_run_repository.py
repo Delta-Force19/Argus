@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.models import (
+    AnalysisEvidence,
     AnalysisExecutionAttempt,
     AnalysisResult,
     AnalysisRun,
@@ -236,6 +237,7 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
             payload: dict[str, object],
             warnings: list[str],
             output_hash: str,
+            evidence_set_hash: str,
     ) -> AnalysisResult:
         row = AnalysisResult(
             analysis_run_id=analysis_run_id,
@@ -243,7 +245,46 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
             payload=payload,
             warnings=warnings,
             output_hash=output_hash,
+            evidence_set_hash=evidence_set_hash,
         )
         self.session.add(row)
         self.flush()
         return row
+
+    def create_evidence(
+            self,
+            *,
+            analysis_result_id: int,
+            evidence_index: int,
+            evidence_schema_version: str,
+            category: str,
+            modality: str,
+            locator: dict[str, object],
+            payload: dict[str, object],
+            evidence_hash: str,
+    ) -> AnalysisEvidence:
+        row = AnalysisEvidence(
+            analysis_result_id=analysis_result_id,
+            evidence_index=evidence_index,
+            evidence_schema_version=evidence_schema_version,
+            category=category,
+            modality=modality,
+            locator=locator,
+            payload=payload,
+            evidence_hash=evidence_hash,
+        )
+        self.session.add(row)
+        self.flush()
+        return row
+
+    def list_evidence(
+            self,
+            analysis_result_id: int,
+    ) -> list[AnalysisEvidence]:
+        return list(self.session.scalars(
+            select(AnalysisEvidence)
+            .where(
+                AnalysisEvidence.analysis_result_id == analysis_result_id
+            )
+            .order_by(AnalysisEvidence.evidence_index.asc())
+        ))

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from argus.analysis.schemas import DiscourseMetrics
 from argus.models import (
-    AnalysisEvidence,
     Article,
+    DiscourseAnalysisEvidence,
     DiscourseAnalysisResult,
     ProcessingState,
 )
@@ -118,7 +118,7 @@ class DiscourseAnalysisRepository(
         self.flush()
 
         evidence_rows = [
-            AnalysisEvidence(
+            DiscourseAnalysisEvidence(
                 analysis_result_id=result.id,
                 category=evidence.category.value,
                 sentence=evidence.sentence,

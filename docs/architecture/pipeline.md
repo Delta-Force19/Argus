@@ -159,14 +159,20 @@ change must preserve per-article failure isolation.
 The document-native analytical boundary uses `AnalysisRun` rather than the
 legacy article `ProcessingState`. It has its own exact input fingerprint,
 software identity, method registry, attempt ledger and immutable
-`AnalysisResult`. The initial executable pair is
-`lexical-discourse@lexical-en-v0.1`.
+`AnalysisResult`. The current executable pair is
+`lexical-discourse@lexical-en-v0.2`; its result and ordered source-located
+`AnalysisEvidence` rows are one atomic write.
 
 Execution claims are atomic and append an `AnalysisExecutionAttempt`. A process
 death after the committed `running` claim remains visible and is never reset
 implicitly. An operator may explicitly abandon a sufficiently old attempt with
 `recover-analysis`; operator, reason and timestamps remain in the audit trail,
 and retry creates a new attempt.
+
+Text evidence uses exact half-open character offsets into the immutable
+derived-text artifact. Its excerpt and content digest are revalidated when the
+result is read. Image, audio and video modalities are reserved in storage but
+remain fail-closed until their source manifests and locator validators exist.
 
 ## Current Limitation
 

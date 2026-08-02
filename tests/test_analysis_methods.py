@@ -2,6 +2,7 @@ import unittest
 
 from argus.analysis.methods import (
     AnalysisMethodRegistry,
+    LEXICAL_DISCOURSE_METHOD_VERSION,
     LexicalDiscourseMethod,
 )
 from argus.analysis.schemas import (
@@ -9,7 +10,6 @@ from argus.analysis.schemas import (
     EvidenceCategory,
     EvidenceSpan,
 )
-from argus.processing import DISCOURSE_METHOD_VERSION
 
 
 class StubAnalyzer:
@@ -31,6 +31,8 @@ class StubAnalyzer:
                 EvidenceSpan(
                     category=EvidenceCategory.CERTAINTY,
                     sentence="We clearly agree!",
+                    start_char=0,
+                    end_char=17,
                     matched_terms=["clearly"],
                 )
             ],
@@ -41,7 +43,10 @@ class AnalysisMethodTests(unittest.TestCase):
     def setUp(self) -> None:
         self.analyzer = StubAnalyzer()
         self.method = LexicalDiscourseMethod(self.analyzer)
-        self.manifest = {"document": {"language": "en"}}
+        self.manifest = {
+            "document": {"language": "en"},
+            "text": {"derived_artifact_id": 12},
+        }
 
     def test_lexical_method_returns_json_metrics_and_evidence(self) -> None:
         output = self.method.execute(
@@ -51,23 +56,25 @@ class AnalysisMethodTests(unittest.TestCase):
         )
 
         self.assertEqual(output.result_schema_version,
-                         "lexical-discourse-result@1")
+                         "lexical-discourse-result@2")
         self.assertEqual(output.payload["metrics"]["word_count"], 4)
+        self.assertNotIn("evidence", output.payload)
         self.assertEqual(
-            output.payload["evidence"][0],
-            {
-                "category": "certainty",
-                "sentence": "We clearly agree!",
-                "matched_terms": ["clearly"],
-            },
+            output.evidence[0].payload,
+            {"excerpt": "We clearly agree!", "matched_terms": ["clearly"]},
         )
+        self.assertEqual(output.evidence[0].locator["start_char"], 0)
+        self.assertEqual(output.evidence[0].locator["end_char"], 17)
         self.assertEqual(self.analyzer.text, "We clearly agree!")
 
     def test_lexical_method_rejects_language_and_configuration(self) -> None:
         with self.assertRaisesRegex(ValueError, "English"):
             self.method.execute(
                 text="Текст.",
-                input_manifest={"document": {"language": "ru"}},
+                input_manifest={
+                    "document": {"language": "ru"},
+                    "text": {"derived_artifact_id": 12},
+                },
                 configuration={},
             )
         with self.assertRaisesRegex(ValueError, "does not accept"):
@@ -80,7 +87,10 @@ class AnalysisMethodTests(unittest.TestCase):
     def test_registry_requires_exact_name_and_version(self) -> None:
         registry = AnalysisMethodRegistry((self.method,))
         self.assertIs(
-            registry.require("lexical-discourse", DISCOURSE_METHOD_VERSION),
+            registry.require(
+                "lexical-discourse",
+                LEXICAL_DISCOURSE_METHOD_VERSION,
+            ),
             self.method,
         )
         with self.assertRaisesRegex(ValueError, "Supported"):

@@ -87,6 +87,7 @@ from argus.services.document_analysis_input_service import (
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.analysis_execution_service import (
     execute_analysis_run,
+    get_analysis_evidence,
     get_analysis_attempt_history,
     get_analysis_run_result,
     recover_stale_analysis_run,
@@ -1510,7 +1511,8 @@ def execute_analysis(
     typer.echo(
         f"result_schema={result.result_schema_version} "
         f"output_hash={result.output_hash} "
-        f"warnings={result.warning_count}"
+        f"warnings={result.warning_count} "
+        f"evidence={result.evidence_count}"
     )
 
 
@@ -1539,7 +1541,9 @@ def analysis_result(
     typer.echo(
         f"result_schema={result.result_schema_version} "
         f"output_hash={result.output_hash} "
-        f"warnings={len(result.warnings)}"
+        f"warnings={len(result.warnings)} "
+        f"evidence={result.evidence_count} "
+        f"evidence_set_hash={result.evidence_set_hash!r}"
     )
     typer.echo(
         "payload="
@@ -1552,6 +1556,51 @@ def analysis_result(
     )
     for warning in result.warnings:
         typer.echo(f"warning={warning!r}")
+
+
+@app.command()
+def analysis_evidence(
+        analysis_run_id: int = typer.Option(
+            ...,
+            "--analysis-run-id",
+            min=1,
+            help="Completed analysis run whose evidence should be shown.",
+        ),
+) -> None:
+    """Read ordered, hash-verified, source-located analytical evidence."""
+
+    result = get_analysis_evidence(analysis_run_id=analysis_run_id)
+    typer.echo(
+        f"analysis_run_id={result.analysis_run_id} "
+        f"analysis_result_id={result.analysis_result_id} "
+        f"shown={len(result.evidence)} "
+        f"evidence_set_hash={result.evidence_set_hash!r}"
+    )
+    for item in result.evidence:
+        typer.echo(
+            f"evidence={item.evidence_index} id={item.evidence_id} "
+            f"schema={item.evidence_schema_version!r} "
+            f"category={item.category!r} modality={item.modality!r} "
+            f"hash={item.evidence_hash}"
+        )
+        typer.echo(
+            "locator="
+            + json.dumps(
+                item.locator,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        typer.echo(
+            "evidence_payload="
+            + json.dumps(
+                item.payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
 
 
 @app.command()

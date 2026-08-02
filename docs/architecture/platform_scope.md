@@ -89,6 +89,27 @@ Brief responses must retain access to:
 Argus must remain operational without a generative model. External and local
 models may later be supported through optional adapters.
 
+## Synthetic-origin assessment
+
+Argus will assess possible synthetic or AI-assisted origin for supported text,
+images, audio and video. This is an origin-analysis family, not a binary truth
+classifier. It must distinguish cryptographic provenance, generator-specific
+watermarks and passive forensic signals, retain the exact method and model
+version, and attach every local signal to source-located evidence.
+
+Allowed conclusions include `verified_synthetic`, `verified_ai_edited`,
+`synthetic_signals_detected`, `no_synthetic_signals_detected`, `inconclusive`
+and `provenance_invalid`. `verified_human` is not an allowed inference from the
+absence of detectable signals. A numeric `synthetic_probability` may be shown
+only when calibrated for the relevant language, genre, modality and input
+conditions; otherwise the value is a method-specific `detector_score` with
+explicit limitations.
+
+The first implementation target is experimental text analysis. C2PA and media
+forensics follow only after image, audio and video artifacts have immutable
+input manifests and verifiable locator contracts. No detector may write a
+conclusion without exposing its evidence and uncertainty.
+
 ## Incremental implementation sequence
 
 The domain will be introduced in this order:

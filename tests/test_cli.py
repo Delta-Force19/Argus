@@ -112,6 +112,8 @@ from argus.services.document_analysis_input_service import (
 from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.services.analysis_run_service import PreparedAnalysisRun
 from argus.services.analysis_execution_service import (
+    AnalysisEvidenceSet,
+    AnalysisEvidenceView,
     AnalysisAttemptHistory,
     AnalysisAttemptView,
     AnalysisRunResultView,
@@ -230,6 +232,8 @@ class CLITests(unittest.TestCase):
             software_version="git:" + "a" * 40,
             result_schema_version="lexical-discourse-result@1",
             output_hash="b" * 64,
+            evidence_set_hash=None,
+            evidence_count=0,
             payload={"metrics": {"word_count": 4}},
             warnings=("Input limitation.",),
         )
@@ -266,6 +270,7 @@ class CLITests(unittest.TestCase):
             result_schema_version="lexical-discourse-result@1",
             output_hash="b" * 64,
             warning_count=0,
+            evidence_count=2,
         )
 
         result = runner.invoke(
@@ -288,6 +293,7 @@ class CLITests(unittest.TestCase):
             f"output_hash={'b' * 64} warnings=0",
             result.stdout,
         )
+        self.assertIn("evidence=2", result.stdout)
 
     @patch("argus.interface.cli.execute_analysis_run")
     def test_execute_analysis_passes_explicit_retry(
@@ -306,6 +312,7 @@ class CLITests(unittest.TestCase):
             result_schema_version="lexical-discourse-result@1",
             output_hash="b" * 64,
             warning_count=1,
+            evidence_count=0,
         )
 
         result = runner.invoke(
@@ -323,6 +330,48 @@ class CLITests(unittest.TestCase):
             analysis_run_id=92,
             retry_failed=True,
         )
+
+    @patch("argus.interface.cli.get_analysis_evidence")
+    def test_analysis_evidence_prints_verified_source_locator(
+            self,
+            get_analysis_evidence,
+    ) -> None:
+        get_analysis_evidence.return_value = AnalysisEvidenceSet(
+            analysis_run_id=92,
+            analysis_result_id=17,
+            evidence_set_hash="c" * 64,
+            evidence=(AnalysisEvidenceView(
+                evidence_id=3,
+                evidence_index=0,
+                evidence_schema_version="lexical-discourse-evidence@1",
+                category="certainty",
+                modality="text",
+                locator={
+                    "type": "text_span",
+                    "derived_artifact_id": 8,
+                    "start_char": 0,
+                    "end_char": 17,
+                    "content_sha256": "d" * 64,
+                },
+                payload={
+                    "excerpt": "We clearly agree!",
+                    "matched_terms": ["clearly"],
+                },
+                evidence_hash="e" * 64,
+            ),),
+        )
+
+        result = runner.invoke(
+            app,
+            ["analysis-evidence", "--analysis-run-id", "92"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        get_analysis_evidence.assert_called_once_with(analysis_run_id=92)
+        self.assertIn("analysis_result_id=17 shown=1", result.stdout)
+        self.assertIn("category='certainty' modality='text'", result.stdout)
+        self.assertIn('"start_char":0', result.stdout)
+        self.assertIn('"excerpt":"We clearly agree!"', result.stdout)
 
     @patch("argus.interface.cli.prepare_analysis_run")
     def test_prepare_analysis_persists_reproducible_contract(

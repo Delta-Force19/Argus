@@ -1116,20 +1116,48 @@ contract requires no schema migration.
 - a result-schema version;
 - a canonical JSON payload;
 - explicit warnings;
-- a SHA-256 hash over schema, payload and warnings;
+- a nullable evidence-set hash (`NULL` only for results created before the
+  external evidence contract);
+- a SHA-256 hash over schema, payload, warnings and, for current results, the
+  evidence-set hash;
 - creation time.
 
 The one-result-per-run constraint prevents an execution from silently
 overwriting history. A successful repeated execution request returns the
 existing hash-verified result without invoking the method again. A corrupted
-run manifest, configuration, text artifact or result hash fails closed.
+run manifest, configuration, text artifact, evidence row, evidence-set hash or
+result hash fails closed.
 
-The first registered method is
-`lexical-discourse@lexical-en-v0.1`. It adapts the existing deterministic
-English lexical discourse analyzer and emits schema
-`lexical-discourse-result@1`. It accepts an empty configuration only and
-records counts plus sentence-level lexical evidence. Other languages and
-method configurations require their own explicit versions.
+### Analysis evidence
+
+`AnalysisEvidence` is one immutable observation produced by an exact method
+version and owned by one `AnalysisResult`. It stores a stable zero-based order,
+evidence schema, category, modality, canonical source locator, method-specific
+payload and a SHA-256 hash over those fields. The ordered list of row hashes is
+itself content-addressed by the result's evidence-set hash. Result, evidence
+rows and the completed lifecycle transition are committed atomically.
+
+The current executable locator is `text_span`: derived-text artifact identity,
+half-open `start_char`/`end_char` coordinates and a SHA-256 hash of the exact
+UTF-8 excerpt. Read paths verify the artifact against the run manifest, slice
+the stored source text again and compare both excerpt and digest. Database
+modality values reserve `image`, `audio` and `video`, but execution rejects
+them until media input manifests and modality-specific locator validators
+exist; a JSON shape alone is not treated as proof that media evidence points
+to source bytes.
+
+The former `analysis_evidence` table belongs to the legacy article discourse
+pipeline and is preserved, without rewriting its rows, as
+`discourse_analysis_evidence`.
+
+The current registered method is
+`lexical-discourse@lexical-en-v0.2`. It adapts the existing deterministic
+English lexical discourse analyzer, emits metrics in
+`lexical-discourse-result@2`, and writes every matched sentence separately as
+`lexical-discourse-evidence@1`. It accepts an empty configuration only. Other
+languages and method configurations require their own explicit versions.
+Historical `lexical-en-v0.1` results remain readable with their original
+embedded evidence and hashes; coordinates are not fabricated retroactively.
 
 ### Analysis execution attempt
 

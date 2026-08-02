@@ -7,12 +7,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from argus.analysis.methods import (
+    AnalysisMethodEvidence,
     AnalysisMethodOutput,
     AnalysisMethodRegistry,
 )
 from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.knowledge import EntityType
 from argus.models import (
+    AnalysisEvidence,
     AnalysisExecutionAttempt,
     AnalysisResult,
     AnalysisRun,
@@ -20,6 +22,7 @@ from argus.models import (
 from argus.services.analysis_execution_service import (
     AnalysisExecutionFailed,
     execute_analysis_run,
+    get_analysis_evidence,
     get_analysis_attempt_history,
     get_analysis_run_result,
     recover_stale_analysis_run,
@@ -55,6 +58,25 @@ class StubMethod:
                 "option": configuration.get("option"),
             },
             warnings=("Test warning.",),
+            evidence=(
+                AnalysisMethodEvidence(
+                    evidence_schema_version="test-evidence@1",
+                    category="test-signal",
+                    modality="text",
+                    locator={
+                        "type": "text_span",
+                        "derived_artifact_id": (
+                            input_manifest["text"]["derived_artifact_id"]
+                        ),
+                        "start_char": 0,
+                        "end_char": len(text),
+                        "content_sha256": sha256(
+                            text.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                    payload={"excerpt": text, "signal": "test"},
+                ),
+            ),
         )
 
 
@@ -111,6 +133,7 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
         self.assertEqual(first.status, AnalysisRunStatus.COMPLETED)
         self.assertEqual(first.attempt_count, 1)
         self.assertEqual(first.warning_count, 1)
+        self.assertEqual(first.evidence_count, 1)
         self.assertEqual(len(first.output_hash), 64)
         self.assertEqual(self.method.calls, 1)
 
@@ -131,6 +154,16 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
         self.assertEqual(view.analysis_result_id, first.analysis_result_id)
         self.assertEqual(view.payload["option"], "value")
         self.assertEqual(view.warnings, ("Test warning.",))
+        self.assertEqual(view.evidence_count, 1)
+        self.assertEqual(len(view.evidence_set_hash), 64)
+
+        evidence = get_analysis_evidence(
+            analysis_run_id=first.analysis_run_id,
+            session_factory=self.fixture.session_factory,
+        )
+        self.assertEqual(len(evidence.evidence), 1)
+        self.assertEqual(evidence.evidence[0].category, "test-signal")
+        self.assertEqual(evidence.evidence[0].payload["signal"], "test")
 
         session = self.fixture.session_factory()
         try:
@@ -145,6 +178,10 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
                 select(func.count()).select_from(AnalysisResult)
             )
             self.assertEqual(count, 1)
+            evidence_count = session.scalar(
+                select(func.count()).select_from(AnalysisEvidence)
+            )
+            self.assertEqual(evidence_count, 1)
             attempt = session.scalar(select(AnalysisExecutionAttempt))
             self.assertEqual(
                 attempt.status,
@@ -306,6 +343,90 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "hash is inconsistent"):
             self._execute()
         self.assertEqual(self.method.calls, 1)
+
+    def test_legacy_result_without_external_evidence_remains_readable(
+            self,
+    ) -> None:
+        completed = self._execute()
+        session = self.fixture.session_factory()
+        try:
+            result = session.get(AnalysisResult, completed.analysis_result_id)
+            for evidence in session.scalars(select(AnalysisEvidence)):
+                session.delete(evidence)
+            result.evidence_set_hash = None
+            result.output_hash = self._hash({
+                "result_schema_version": result.result_schema_version,
+                "payload": result.payload,
+                "warnings": result.warnings,
+            })
+            session.commit()
+        finally:
+            session.close()
+
+        view = get_analysis_run_result(
+            analysis_run_id=completed.analysis_run_id,
+            session_factory=self.fixture.session_factory,
+        )
+        evidence = get_analysis_evidence(
+            analysis_run_id=completed.analysis_run_id,
+            session_factory=self.fixture.session_factory,
+        )
+
+        self.assertIsNone(view.evidence_set_hash)
+        self.assertEqual(view.evidence_count, 0)
+        self.assertIsNone(evidence.evidence_set_hash)
+        self.assertEqual(evidence.evidence, ())
+
+    def test_corrupt_evidence_or_locator_fails_closed(self) -> None:
+        result = self._execute()
+        session = self.fixture.session_factory()
+        try:
+            row = session.scalar(select(AnalysisEvidence))
+            row.payload = {**row.payload, "signal": "corrupt"}
+            session.commit()
+        finally:
+            session.close()
+
+        with self.assertRaisesRegex(ValueError, "evidence hash"):
+            get_analysis_evidence(
+                analysis_run_id=result.analysis_run_id,
+                session_factory=self.fixture.session_factory,
+            )
+
+    def test_invalid_source_locator_fails_execution_atomically(self) -> None:
+        original_execute = self.method.execute
+
+        def invalid_execute(**kwargs):
+            output = original_execute(**kwargs)
+            item = output.evidence[0]
+            return AnalysisMethodOutput(
+                result_schema_version=output.result_schema_version,
+                payload=output.payload,
+                warnings=output.warnings,
+                evidence=(AnalysisMethodEvidence(
+                    evidence_schema_version=item.evidence_schema_version,
+                    category=item.category,
+                    modality=item.modality,
+                    locator={**item.locator, "end_char": 999999},
+                    payload=item.payload,
+                ),),
+            )
+
+        self.method.execute = invalid_execute
+        with self.assertRaisesRegex(
+            AnalysisExecutionFailed,
+            "character range is invalid",
+        ):
+            self._execute()
+
+        session = self.fixture.session_factory()
+        try:
+            self.assertIsNone(session.scalar(select(AnalysisResult)))
+            self.assertIsNone(session.scalar(select(AnalysisEvidence)))
+            run = session.get(AnalysisRun, self.prepared.analysis_run_id)
+            self.assertEqual(run.status, AnalysisRunStatus.FAILED)
+        finally:
+            session.close()
 
     def test_result_view_requires_completed_run(self) -> None:
         with self.assertRaisesRegex(ValueError, "status is prepared"):

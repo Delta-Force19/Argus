@@ -29,6 +29,7 @@ EXPECTED_TABLES = {
     "document_versions",
     "documents",
     "discourse_analysis_results",
+    "discourse_analysis_evidence",
     "derived_artifacts",
     "entities",
     "entity_candidate_assignments",
@@ -885,6 +886,7 @@ class MigrationIntegrationTests(unittest.TestCase):
                 "payload",
                 "warnings",
                 "output_hash",
+                "evidence_set_hash",
                 "created_at",
             },
         )
@@ -1089,6 +1091,112 @@ class MigrationIntegrationTests(unittest.TestCase):
         self.assertEqual(row["migrated"], 1)
         self.assertIsNotNone(row["started_at"])
         self.assertIsNotNone(row["finished_at"])
+
+    def test_analysis_evidence_migration_preserves_legacy_rows(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "evidence.db"
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "f3a4b5c6d7e8")
+                prior_engine = create_engine(database_url)
+                try:
+                    with prior_engine.begin() as connection:
+                        connection.execute(text("""
+                            INSERT INTO articles (
+                                id, url, title, source, language, fetched_at
+                            ) VALUES (
+                                1, 'https://example.com/evidence',
+                                'Evidence', 'Example', 'en',
+                                CURRENT_TIMESTAMP
+                            )
+                        """))
+                        connection.execute(text("""
+                            INSERT INTO discourse_analysis_results (
+                                id, article_id, method_version, word_count,
+                                sentence_count, average_sentence_length,
+                                question_count, exclamation_count,
+                                first_person_plural_count,
+                                third_person_plural_count,
+                                certainty_marker_count,
+                                uncertainty_marker_count,
+                                fear_marker_count, threat_marker_count,
+                                created_at
+                            ) VALUES (
+                                1, 1, 'lexical-en-v0.1', 4, 1, 4.0,
+                                0, 0, 1, 0, 1, 0, 0, 0,
+                                CURRENT_TIMESTAMP
+                            )
+                        """))
+                        connection.execute(text("""
+                            INSERT INTO analysis_evidence (
+                                id, analysis_result_id, category,
+                                sentence, matched_terms
+                            ) VALUES (
+                                1, 1, 'certainty', 'We clearly agree.',
+                                '["clearly"]'
+                            )
+                        """))
+                finally:
+                    prior_engine.dispose()
+                command.upgrade(config, "head")
+
+            result_engine = create_engine(database_url)
+            try:
+                inspector = inspect(result_engine)
+                with result_engine.connect() as connection:
+                    legacy = connection.execute(text("""
+                        SELECT analysis_result_id, category, sentence,
+                               matched_terms
+                        FROM discourse_analysis_evidence
+                    """)).mappings().one()
+                    current_count = connection.execute(text(
+                        "SELECT COUNT(*) FROM analysis_evidence"
+                    )).scalar_one()
+                result_columns = {
+                    column["name"]
+                    for column in inspector.get_columns("analysis_results")
+                }
+            finally:
+                result_engine.dispose()
+
+        self.assertEqual(legacy["analysis_result_id"], 1)
+        self.assertEqual(legacy["category"], "certainty")
+        self.assertEqual(legacy["matched_terms"], '["clearly"]')
+        self.assertEqual(current_count, 0)
+        self.assertIn("evidence_set_hash", result_columns)
+
+    def test_analysis_evidence_migration_downgrades_cleanly(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "evidence_down.db"
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "head")
+                command.downgrade(config, "f3a4b5c6d7e8")
+
+            test_engine = create_engine(database_url)
+            try:
+                inspector = inspect(test_engine)
+                table_names = set(inspector.get_table_names())
+                result_columns = {
+                    column["name"]
+                    for column in inspector.get_columns("analysis_results")
+                }
+            finally:
+                test_engine.dispose()
+
+        self.assertIn("analysis_evidence", table_names)
+        self.assertNotIn("discourse_analysis_evidence", table_names)
+        self.assertNotIn("evidence_set_hash", result_columns)
 
 
 if __name__ == "__main__":

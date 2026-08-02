@@ -767,12 +767,16 @@ a new preparation is required. Unknown methods, unsupported configurations and
 unsupported document languages fail before a claim and therefore do not create
 a false execution attempt.
 
-On success, one immutable `AnalysisResult` and the `completed` transition are
-committed atomically. The output hash covers its schema, canonical JSON payload
-and warnings. On method failure, no result is inserted; the run becomes
+On success, one immutable `AnalysisResult`, its ordered `AnalysisEvidence`
+rows and the `completed` transition are committed atomically. Each evidence
+row has a canonical locator and hash; the result binds their ordered hashes
+through an evidence-set hash, which is covered by the output hash together
+with schema, canonical JSON payload and warnings. On method failure, neither
+result nor partial evidence is inserted; the run becomes
 `failed`, retains a bounded diagnostic and can be retried only explicitly.
-Repeating a completed execution verifies its stored input and output, then
-returns the same result with `executed=false`.
+Repeating a completed execution verifies its stored input, output, evidence
+hashes and source coordinates, then returns the same result with
+`executed=false`.
 
 `argus analysis-result` reads a completed result without requiring the current
 code version to match the historical run. It still verifies the run hashes,
@@ -780,10 +784,13 @@ text artifact and output hash before emitting canonical JSON. This separates
 historical inspection from permission to execute old input under new code.
 
 The first executable method is
-`lexical-discourse@lexical-en-v0.1`, backed by the existing English lexical
+`lexical-discourse@lexical-en-v0.2`, backed by the existing English lexical
 discourse analyzer. It accepts `{}` and emits
-`lexical-discourse-result@1`; the earlier ad hoc `rhetoric-signals` name is not
-treated as an implementation merely because it appears in historical runs.
+`lexical-discourse-result@2` plus source-located
+`lexical-discourse-evidence@1`; the earlier ad hoc `rhetoric-signals` name is
+not treated as an implementation merely because it appears in historical
+runs. `analysis-evidence` is the public read path for the ordered verified
+evidence set.
 
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication

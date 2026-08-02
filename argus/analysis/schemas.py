@@ -15,6 +15,8 @@ class EvidenceCategory(str, Enum):
 class EvidenceSpan:
     category: EvidenceCategory
     sentence: str
+    start_char: int
+    end_char: int
     matched_terms: list[str] = field(
         default_factory=list
     )

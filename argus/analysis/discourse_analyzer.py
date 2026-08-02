@@ -149,10 +149,17 @@ class DiscourseAnalyzer:
 
             total += len(matched_terms)
 
+            sentence_text = sentence.text
+            stripped = sentence_text.strip()
+            leading = len(sentence_text) - len(sentence_text.lstrip())
+            trailing = len(sentence_text) - len(sentence_text.rstrip())
+
             evidence.append(
                 EvidenceSpan(
                     category=category,
-                    sentence=sentence.text.strip(),
+                    sentence=stripped,
+                    start_char=sentence.start_char + leading,
+                    end_char=sentence.end_char - trailing,
                     matched_terms=sorted(
                         set(matched_terms)
                     ),
