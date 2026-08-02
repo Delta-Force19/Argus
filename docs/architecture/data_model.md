@@ -1130,3 +1130,15 @@ English lexical discourse analyzer and emits schema
 `lexical-discourse-result@1`. It accepts an empty configuration only and
 records counts plus sentence-level lexical evidence. Other languages and
 method configurations require their own explicit versions.
+
+### Analysis execution attempt
+
+`AnalysisExecutionAttempt` is the append-only audit record for one claimed
+execution of an `AnalysisRun`. It stores the run and monotonically increasing
+attempt number, status, start and finish times, bounded error, and—only for an
+explicit stale recovery—the operator and reason. Completed, failed and
+abandoned attempts are never overwritten by a later retry.
+
+Migration from the earlier run-only lifecycle reconstructs only the latest
+observable attempt for runs whose `attempt_count` is non-zero and marks that
+row as migrated. It does not invent missing detail for earlier retries.

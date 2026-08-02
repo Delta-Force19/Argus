@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from argus.acquisition.contracts import RetrievalOutcome
-from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.database import Base
 from argus.documents import DerivedArtifactType, DocumentType
 from argus.endpoints import EndpointType
@@ -1397,6 +1397,69 @@ class AnalysisResult(Base):
         DateTime,
         default=utc_now,
         nullable=False,
+    )
+
+
+class AnalysisExecutionAttempt(Base):
+    """Append-only audit record for one claimed analysis execution."""
+
+    __tablename__ = "analysis_execution_attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "attempt_number >= 1",
+            name="ck_analysis_execution_attempts_number_positive",
+        ),
+        UniqueConstraint(
+            "analysis_run_id",
+            "attempt_number",
+            name="uq_analysis_execution_attempts_run_number",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analysis_run_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "analysis_runs.id",
+            name=(
+                "fk_analysis_execution_attempts_run_id_analysis_runs"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[AnalysisAttemptStatus] = mapped_column(
+        SQLAlchemyEnum(
+            AnalysisAttemptStatus,
+            name="analysis_attempt_status",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recovery_operator: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    recovery_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    migrated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
     )
 
 

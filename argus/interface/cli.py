@@ -87,7 +87,9 @@ from argus.services.document_analysis_input_service import (
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.analysis_execution_service import (
     execute_analysis_run,
+    get_analysis_attempt_history,
     get_analysis_run_result,
+    recover_stale_analysis_run,
 )
 from argus.services.latest_news_service import get_latest_news
 from argus.services.telegram_bot_service import run_telegram_news_bot
@@ -1550,6 +1552,82 @@ def analysis_result(
     )
     for warning in result.warnings:
         typer.echo(f"warning={warning!r}")
+
+
+@app.command()
+def recover_analysis(
+        analysis_run_id: int = typer.Option(
+            ...,
+            "--analysis-run-id",
+            min=1,
+            help="Running analysis whose stale attempt should be abandoned.",
+        ),
+        stale_after_minutes: int = typer.Option(
+            60,
+            "--stale-after-minutes",
+            min=1,
+            help="Minimum age of the running attempt.",
+        ),
+        operator: str = typer.Option(
+            ...,
+            "--operator",
+            help="Person or operational identity authorizing recovery.",
+        ),
+        reason: str = typer.Option(
+            ...,
+            "--reason",
+            help="Evidence-based reason the attempt is considered abandoned.",
+        ),
+) -> None:
+    """Abandon one stale running attempt while preserving its audit trail."""
+
+    result = recover_stale_analysis_run(
+        analysis_run_id=analysis_run_id,
+        stale_after_minutes=stale_after_minutes,
+        operator=operator,
+        reason=reason,
+    )
+    typer.echo(
+        f"analysis_run_id={result.analysis_run_id} "
+        f"attempt={result.attempt_number} "
+        f"status={result.status.value} recovered=true "
+        f"operator={result.operator!r} reason={result.reason!r}"
+    )
+
+
+@app.command()
+def analysis_attempts(
+        analysis_run_id: int = typer.Option(
+            ...,
+            "--analysis-run-id",
+            min=1,
+            help="Analysis run whose attempt history should be shown.",
+        ),
+) -> None:
+    """Read the ordered immutable execution-attempt audit trail."""
+
+    history = get_analysis_attempt_history(
+        analysis_run_id=analysis_run_id,
+    )
+    typer.echo(
+        f"analysis_run_id={history.analysis_run_id} "
+        f"status={history.status.value} attempts={history.attempt_count} "
+        f"shown={len(history.attempts)}"
+    )
+    for attempt in history.attempts:
+        finished_at = (
+            attempt.finished_at.isoformat()
+            if attempt.finished_at is not None else None
+        )
+        typer.echo(
+            f"attempt={attempt.attempt_number} "
+            f"status={attempt.status.value} "
+            f"started_at={attempt.started_at.isoformat()!r} "
+            f"finished_at={finished_at!r} "
+            f"migrated={str(attempt.migrated).lower()} "
+            f"operator={attempt.recovery_operator!r} "
+            f"reason={attempt.recovery_reason!r} error={attempt.error!r}"
+        )
 
 
 @app.command()

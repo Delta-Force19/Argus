@@ -3,8 +3,12 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from argus.analysis_runs import AnalysisRunStatus
-from argus.models import AnalysisResult, AnalysisRun
+from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
+from argus.models import (
+    AnalysisExecutionAttempt,
+    AnalysisResult,
+    AnalysisRun,
+)
 from argus.storage.base_repository import BaseRepository
 
 
@@ -73,6 +77,7 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
     ) -> bool:
         """Atomically claim one prepared or explicitly retried run."""
 
+        attempt_number = run.attempt_count + 1
         allowed = [AnalysisRunStatus.PREPARED]
         if retry_failed:
             allowed.append(AnalysisRunStatus.FAILED)
@@ -92,7 +97,42 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
         )
         result = self.session.execute(statement)
         self.session.flush()
-        return result.rowcount == 1
+        if result.rowcount != 1:
+            return False
+        self.session.add(AnalysisExecutionAttempt(
+            analysis_run_id=run.id,
+            attempt_number=attempt_number,
+            status=AnalysisAttemptStatus.RUNNING,
+            started_at=started_at,
+        ))
+        self.session.flush()
+        return True
+
+    def get_current_attempt(
+            self,
+            run: AnalysisRun,
+    ) -> AnalysisExecutionAttempt | None:
+        if run.attempt_count < 1:
+            return None
+        return self.session.scalar(
+            select(AnalysisExecutionAttempt).where(
+                AnalysisExecutionAttempt.analysis_run_id == run.id,
+                AnalysisExecutionAttempt.attempt_number
+                == run.attempt_count,
+            )
+        )
+
+    def list_attempts(
+            self,
+            analysis_run_id: int,
+    ) -> list[AnalysisExecutionAttempt]:
+        return list(self.session.scalars(
+            select(AnalysisExecutionAttempt)
+            .where(
+                AnalysisExecutionAttempt.analysis_run_id == analysis_run_id
+            )
+            .order_by(AnalysisExecutionAttempt.attempt_number.asc())
+        ))
 
     def mark_completed(
             self,
@@ -105,6 +145,11 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
         run.status = AnalysisRunStatus.COMPLETED
         run.finished_at = finished_at
         run.last_error = None
+        attempt = self.get_current_attempt(run)
+        if attempt is None or attempt.status is not AnalysisAttemptStatus.RUNNING:
+            raise ValueError("Running analysis attempt is missing.")
+        attempt.status = AnalysisAttemptStatus.COMPLETED
+        attempt.finished_at = finished_at
         self.flush()
 
     def mark_failed(
@@ -119,7 +164,62 @@ class AnalysisRunRepository(BaseRepository[AnalysisRun]):
         run.status = AnalysisRunStatus.FAILED
         run.finished_at = finished_at
         run.last_error = error[:4000]
+        attempt = self.get_current_attempt(run)
+        if attempt is None or attempt.status is not AnalysisAttemptStatus.RUNNING:
+            raise ValueError("Running analysis attempt is missing.")
+        attempt.status = AnalysisAttemptStatus.FAILED
+        attempt.finished_at = finished_at
+        attempt.error = error[:4000]
         self.flush()
+
+    def abandon_running(
+            self,
+            run: AnalysisRun,
+            *,
+            finished_at: datetime,
+            operator: str,
+            reason: str,
+    ) -> AnalysisExecutionAttempt:
+        if run.status is not AnalysisRunStatus.RUNNING:
+            raise ValueError("Only a running analysis can be recovered.")
+        attempt = self.get_current_attempt(run)
+        if attempt is None or attempt.status is not AnalysisAttemptStatus.RUNNING:
+            raise ValueError("Running analysis attempt is missing.")
+        diagnostic = f"Abandoned by {operator}: {reason}"[:4000]
+        run_update = self.session.execute(
+            update(AnalysisRun)
+            .where(
+                AnalysisRun.id == run.id,
+                AnalysisRun.status == AnalysisRunStatus.RUNNING,
+                AnalysisRun.attempt_count == run.attempt_count,
+            )
+            .values(
+                status=AnalysisRunStatus.FAILED,
+                finished_at=finished_at,
+                last_error=diagnostic,
+            )
+        )
+        if run_update.rowcount != 1:
+            raise ValueError("Running analysis changed during recovery.")
+        attempt_update = self.session.execute(
+            update(AnalysisExecutionAttempt)
+            .where(
+                AnalysisExecutionAttempt.id == attempt.id,
+                AnalysisExecutionAttempt.status
+                == AnalysisAttemptStatus.RUNNING,
+            )
+            .values(
+                status=AnalysisAttemptStatus.ABANDONED,
+                finished_at=finished_at,
+                error=diagnostic,
+                recovery_operator=operator,
+                recovery_reason=reason,
+            )
+        )
+        if attempt_update.rowcount != 1:
+            raise ValueError("Running attempt changed during recovery.")
+        self.flush()
+        return attempt
 
     def get_result(self, analysis_run_id: int) -> AnalysisResult | None:
         return self.session.scalar(

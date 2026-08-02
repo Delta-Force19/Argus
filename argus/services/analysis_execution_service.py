@@ -1,6 +1,6 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 
@@ -11,7 +11,7 @@ from argus.analysis.methods import (
     AnalysisMethodOutput,
     default_analysis_method_registry,
 )
-from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.database import SessionLocal
 from argus.documents import DerivedArtifactType
 from argus.models import AnalysisResult, AnalysisRun, DerivedArtifact
@@ -55,8 +55,155 @@ class AnalysisRunResultView:
     warnings: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveredAnalysisRun:
+    """Detached audit identity for one explicitly abandoned attempt."""
+
+    analysis_run_id: int
+    attempt_number: int
+    status: AnalysisRunStatus
+    operator: str
+    reason: str
+    started_at: datetime
+    recovered_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisAttemptView:
+    """Detached immutable audit row for one execution attempt."""
+
+    attempt_number: int
+    status: AnalysisAttemptStatus
+    started_at: datetime
+    finished_at: datetime | None
+    error: str | None
+    recovery_operator: str | None
+    recovery_reason: str | None
+    migrated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisAttemptHistory:
+    """Run identity and its ordered execution-attempt audit trail."""
+
+    analysis_run_id: int
+    status: AnalysisRunStatus
+    attempt_count: int
+    attempts: tuple[AnalysisAttemptView, ...]
+
+
 class AnalysisExecutionFailed(RuntimeError):
     """Raised after a method failure has been persisted on its run."""
+
+
+def get_analysis_attempt_history(
+        *,
+        analysis_run_id: int,
+        session_factory: Callable[[], Session] = SessionLocal,
+) -> AnalysisAttemptHistory:
+    """Return the ordered, non-destructive execution audit for one run."""
+
+    if analysis_run_id < 1:
+        raise ValueError("analysis_run_id must be greater than zero.")
+    with session_factory() as session:
+        repository = AnalysisRunRepository(session)
+        run = repository.get_by_id(analysis_run_id)
+        if run is None:
+            raise ValueError(
+                f"Analysis run does not exist: {analysis_run_id}."
+            )
+        rows = repository.list_attempts(run.id)
+        if run.attempt_count == 0 and rows:
+            raise ValueError("Unclaimed analysis run has attempt records.")
+        if run.attempt_count > 0 and (
+            not rows or rows[-1].attempt_number != run.attempt_count
+        ):
+            raise ValueError("Analysis attempt history is incomplete.")
+        return AnalysisAttemptHistory(
+            analysis_run_id=run.id,
+            status=run.status,
+            attempt_count=run.attempt_count,
+            attempts=tuple(
+                AnalysisAttemptView(
+                    attempt_number=row.attempt_number,
+                    status=row.status,
+                    started_at=_as_utc(row.started_at),
+                    finished_at=(
+                        _as_utc(row.finished_at)
+                        if row.finished_at is not None else None
+                    ),
+                    error=row.error,
+                    recovery_operator=row.recovery_operator,
+                    recovery_reason=row.recovery_reason,
+                    migrated=row.migrated,
+                )
+                for row in rows
+            ),
+        )
+
+
+def recover_stale_analysis_run(
+        *,
+        analysis_run_id: int,
+        stale_after_minutes: int,
+        operator: str,
+        reason: str,
+        now: datetime | None = None,
+        session_factory: Callable[[], Session] = SessionLocal,
+) -> RecoveredAnalysisRun:
+    """Explicitly abandon one stale running attempt for audited retry."""
+
+    if analysis_run_id < 1:
+        raise ValueError("analysis_run_id must be greater than zero.")
+    if stale_after_minutes < 1:
+        raise ValueError("stale_after_minutes must be greater than zero.")
+    normalized_operator = operator.strip()
+    normalized_reason = reason.strip()
+    if not normalized_operator or len(normalized_operator) > 255:
+        raise ValueError("operator must contain 1 to 255 characters.")
+    if not normalized_reason or len(normalized_reason) > 4000:
+        raise ValueError("reason must contain 1 to 4000 characters.")
+    recovered_at = _as_utc(now or _utc_now())
+    cutoff = recovered_at - timedelta(minutes=stale_after_minutes)
+
+    with session_factory() as session:
+        repository = AnalysisRunRepository(session)
+        run = repository.get_by_id(analysis_run_id)
+        if run is None:
+            raise ValueError(
+                f"Analysis run does not exist: {analysis_run_id}."
+            )
+        if run.status is not AnalysisRunStatus.RUNNING:
+            raise ValueError(
+                "Only a running analysis run can be recovered."
+            )
+        if repository.get_result(run.id) is not None:
+            raise ValueError("Running analysis run already has a result.")
+        if run.started_at is None:
+            raise ValueError("Running analysis run has no start time.")
+        started_at = _as_utc(run.started_at)
+        if started_at > cutoff:
+            raise ValueError(
+                "Analysis run is not stale: its current attempt is newer "
+                "than the requested threshold."
+            )
+        attempt = repository.abandon_running(
+            run,
+            finished_at=recovered_at,
+            operator=normalized_operator,
+            reason=normalized_reason,
+        )
+        detached = RecoveredAnalysisRun(
+            analysis_run_id=run.id,
+            attempt_number=attempt.attempt_number,
+            status=run.status,
+            operator=normalized_operator,
+            reason=normalized_reason,
+            started_at=started_at,
+            recovered_at=recovered_at,
+        )
+        session.commit()
+        return detached
 
 
 def execute_analysis_run(
@@ -419,3 +566,9 @@ def _require_string_keys(value: object, *, field: str) -> None:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

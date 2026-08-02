@@ -2,6 +2,7 @@ from hashlib import sha256
 import json
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
@@ -9,16 +10,23 @@ from argus.analysis.methods import (
     AnalysisMethodOutput,
     AnalysisMethodRegistry,
 )
-from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.knowledge import EntityType
-from argus.models import AnalysisResult, AnalysisRun
+from argus.models import (
+    AnalysisExecutionAttempt,
+    AnalysisResult,
+    AnalysisRun,
+)
 from argus.services.analysis_execution_service import (
     AnalysisExecutionFailed,
     execute_analysis_run,
+    get_analysis_attempt_history,
     get_analysis_run_result,
+    recover_stale_analysis_run,
 )
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import SoftwareProvenance
+from argus.storage.analysis_run_repository import AnalysisRunRepository
 from tests.test_document_analysis_input_service import (
     DocumentAnalysisInputServiceTests,
 )
@@ -106,6 +114,16 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
         self.assertEqual(len(first.output_hash), 64)
         self.assertEqual(self.method.calls, 1)
 
+        history = get_analysis_attempt_history(
+            analysis_run_id=first.analysis_run_id,
+            session_factory=self.fixture.session_factory,
+        )
+        self.assertEqual(history.attempt_count, 1)
+        self.assertEqual(
+            history.attempts[0].status,
+            AnalysisAttemptStatus.COMPLETED,
+        )
+
         view = get_analysis_run_result(
             analysis_run_id=first.analysis_run_id,
             session_factory=self.fixture.session_factory,
@@ -127,6 +145,12 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
                 select(func.count()).select_from(AnalysisResult)
             )
             self.assertEqual(count, 1)
+            attempt = session.scalar(select(AnalysisExecutionAttempt))
+            self.assertEqual(
+                attempt.status,
+                AnalysisAttemptStatus.COMPLETED,
+            )
+            self.assertFalse(attempt.migrated)
         finally:
             session.close()
 
@@ -158,6 +182,80 @@ class AnalysisExecutionServiceTests(unittest.TestCase):
         self.assertEqual(result.status, AnalysisRunStatus.COMPLETED)
         self.assertEqual(result.attempt_count, 2)
         self.assertEqual(self.method.calls, 2)
+
+        session = self.fixture.session_factory()
+        try:
+            attempts = list(session.scalars(
+                select(AnalysisExecutionAttempt).order_by(
+                    AnalysisExecutionAttempt.attempt_number
+                )
+            ))
+            self.assertEqual(
+                [attempt.status for attempt in attempts],
+                [
+                    AnalysisAttemptStatus.FAILED,
+                    AnalysisAttemptStatus.COMPLETED,
+                ],
+            )
+            self.assertIn("model unavailable", attempts[0].error)
+        finally:
+            session.close()
+
+    def test_stale_running_attempt_is_explicitly_abandoned(self) -> None:
+        started_at = datetime(2026, 7, 31, 10, tzinfo=timezone.utc)
+        session = self.fixture.session_factory()
+        try:
+            run = session.get(AnalysisRun, self.prepared.analysis_run_id)
+            repository = AnalysisRunRepository(session)
+            self.assertTrue(repository.claim_execution(
+                run,
+                started_at=started_at,
+                retry_failed=False,
+            ))
+            session.commit()
+        finally:
+            session.close()
+
+        with self.assertRaisesRegex(ValueError, "not stale"):
+            recover_stale_analysis_run(
+                analysis_run_id=self.prepared.analysis_run_id,
+                stale_after_minutes=60,
+                operator="Victor",
+                reason="Worker process terminated unexpectedly.",
+                now=started_at + timedelta(minutes=59),
+                session_factory=self.fixture.session_factory,
+            )
+
+        recovered = recover_stale_analysis_run(
+            analysis_run_id=self.prepared.analysis_run_id,
+            stale_after_minutes=60,
+            operator="Victor",
+            reason="Worker process terminated unexpectedly.",
+            now=started_at + timedelta(minutes=61),
+            session_factory=self.fixture.session_factory,
+        )
+        self.assertEqual(recovered.status, AnalysisRunStatus.FAILED)
+        self.assertEqual(recovered.attempt_number, 1)
+
+        session = self.fixture.session_factory()
+        try:
+            run = session.get(AnalysisRun, self.prepared.analysis_run_id)
+            attempt = session.scalar(select(AnalysisExecutionAttempt))
+            self.assertEqual(run.status, AnalysisRunStatus.FAILED)
+            self.assertEqual(
+                attempt.status,
+                AnalysisAttemptStatus.ABANDONED,
+            )
+            self.assertEqual(attempt.recovery_operator, "Victor")
+            self.assertEqual(
+                attempt.recovery_reason,
+                "Worker process terminated unexpectedly.",
+            )
+        finally:
+            session.close()
+
+        completed = self._execute(retry_failed=True)
+        self.assertEqual(completed.attempt_count, 2)
 
     def test_unregistered_method_does_not_claim_run(self) -> None:
         with self.assertRaisesRegex(ValueError, "not registered"):

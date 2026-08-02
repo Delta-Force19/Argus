@@ -162,9 +162,11 @@ software identity, method registry, attempt ledger and immutable
 `AnalysisResult`. The initial executable pair is
 `lexical-discourse@lexical-en-v0.1`.
 
-Execution claims are atomic, but no worker lease is recorded. A process death
-after the committed `running` claim can therefore leave that run blocked. This
-is visible state and must not be reset implicitly.
+Execution claims are atomic and append an `AnalysisExecutionAttempt`. A process
+death after the committed `running` claim remains visible and is never reset
+implicitly. An operator may explicitly abandon a sufficiently old attempt with
+`recover-analysis`; operator, reason and timestamps remain in the audit trail,
+and retry creates a new attempt.
 
 ## Current Limitation
 
@@ -175,7 +177,7 @@ Argus does not yet implement:
 - worker leases;
 - execution ownership;
 - heartbeat timestamps;
-- stale-running recovery;
+- automatic stale-running recovery;
 - distributed claim coordination.
 
 These mechanisms should be introduced before parallel or distributed workers

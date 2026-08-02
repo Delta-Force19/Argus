@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "alias_proposals",
     "analysis_runs",
     "analysis_results",
+    "analysis_execution_attempts",
     "candidate_resolution_decisions",
     "candidate_resolution_evidence",
     "candidate_resolution_exclusions",
@@ -1024,6 +1025,70 @@ class MigrationIntegrationTests(unittest.TestCase):
             "started_at",
             "finished_at",
         } & run_columns)
+
+    def test_attempt_audit_migration_backfills_completed_run(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "attempt_audit.db"
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "e2f3a4b5c6d7")
+                prior_engine = create_engine(database_url)
+                try:
+                    with prior_engine.begin() as connection:
+                        connection.execute(text("""
+                            INSERT INTO analysis_runs (
+                                id, document_version_id, entity_type_scope,
+                                analysis_method, analysis_method_version,
+                                software_version, configuration,
+                                configuration_hash, input_schema_version,
+                                input_manifest, input_fingerprint, status,
+                                attempt_count, started_at, finished_at,
+                                created_at
+                            ) VALUES (
+                                5, 999, 'all', 'lexical-discourse',
+                                'lexical-en-v0.1', :software_version, '{}',
+                                :configuration_hash,
+                                'document-analysis-input@2', :input_manifest,
+                                :input_fingerprint, 'completed', 1,
+                                '2026-07-31 10:00:00',
+                                '2026-07-31 10:01:00',
+                                '2026-07-31 09:59:00'
+                            )
+                        """), {
+                            "software_version": "git:" + "a" * 40,
+                            "configuration_hash": "b" * 64,
+                            "input_manifest": (
+                                '{"schema_version":'
+                                '"document-analysis-input@2"}'
+                            ),
+                            "input_fingerprint": "c" * 64,
+                        })
+                finally:
+                    prior_engine.dispose()
+                command.upgrade(config, "head")
+
+            result_engine = create_engine(database_url)
+            try:
+                with result_engine.connect() as connection:
+                    row = connection.execute(text("""
+                        SELECT analysis_run_id, attempt_number, status,
+                               started_at, finished_at, migrated
+                        FROM analysis_execution_attempts
+                    """)).mappings().one()
+            finally:
+                result_engine.dispose()
+
+        self.assertEqual(row["analysis_run_id"], 5)
+        self.assertEqual(row["attempt_number"], 1)
+        self.assertEqual(row["status"], "completed")
+        self.assertEqual(row["migrated"], 1)
+        self.assertIsNotNone(row["started_at"])
+        self.assertIsNotNone(row["finished_at"])
 
 
 if __name__ == "__main__":

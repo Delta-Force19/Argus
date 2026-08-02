@@ -8,3 +8,12 @@ class AnalysisRunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class AnalysisAttemptStatus(str, Enum):
+    """Terminal or active state of one immutable execution attempt."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ABANDONED = "abandoned"

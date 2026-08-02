@@ -750,7 +750,15 @@ stored row that conflicts with its reproducible key is rejected fail-closed.
 `failed` with explicit `--retry-failed`, can become `running`; every successful
 claim increments the attempt counter. The claim is committed before method
 execution, so an interrupted process cannot be mistaken for a never-started
-run. Parallel or stale-running recovery is not yet automatic.
+run. It also appends an immutable running attempt; completion or failure closes
+that same attempt atomically with the run.
+
+`argus recover-analysis` is the only stale-running recovery path. It requires
+an explicit minimum age, operator and reason, refuses a recent/non-running run
+or a run that already has a result, and closes the current attempt as
+`abandoned`. The run becomes `failed`, after which the unchanged contract can
+be executed only with explicit `--retry-failed`. Recovery is intentionally not
+automatic: elapsed time alone is insufficient evidence that a worker died.
 
 Before a claim, Argus verifies the canonical input and configuration hashes,
 the persisted text artifact and the exact current software provenance. A

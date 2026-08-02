@@ -109,11 +109,14 @@ from argus.services.document_analysis_input_service import (
     AnalysisInputText,
     DocumentAnalysisInputBundle,
 )
-from argus.analysis_runs import AnalysisRunStatus
+from argus.analysis_runs import AnalysisAttemptStatus, AnalysisRunStatus
 from argus.services.analysis_run_service import PreparedAnalysisRun
 from argus.services.analysis_execution_service import (
+    AnalysisAttemptHistory,
+    AnalysisAttemptView,
     AnalysisRunResultView,
     ExecutedAnalysisRun,
+    RecoveredAnalysisRun,
 )
 from argus.documents import DerivedArtifactType, DocumentType
 from argus.services.latest_news_service import (
@@ -137,6 +140,81 @@ runner = CliRunner()
 
 
 class CLITests(unittest.TestCase):
+    @patch("argus.interface.cli.get_analysis_attempt_history")
+    def test_analysis_attempts_prints_ordered_audit(
+            self,
+            get_analysis_attempt_history,
+    ) -> None:
+        get_analysis_attempt_history.return_value = AnalysisAttemptHistory(
+            analysis_run_id=92,
+            status=AnalysisRunStatus.FAILED,
+            attempt_count=1,
+            attempts=(AnalysisAttemptView(
+                attempt_number=1,
+                status=AnalysisAttemptStatus.ABANDONED,
+                started_at=datetime(2026, 7, 31, 10),
+                finished_at=datetime(2026, 7, 31, 12),
+                error="Abandoned by Victor: Worker terminated.",
+                recovery_operator="Victor",
+                recovery_reason="Worker terminated.",
+                migrated=False,
+            ),),
+        )
+
+        result = runner.invoke(
+            app,
+            ["analysis-attempts", "--analysis-run-id", "92"],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn(
+            "analysis_run_id=92 status=failed attempts=1 shown=1",
+            result.stdout,
+        )
+        self.assertIn("attempt=1 status=abandoned", result.stdout)
+
+    @patch("argus.interface.cli.recover_stale_analysis_run")
+    def test_recover_analysis_prints_abandoned_attempt(
+            self,
+            recover_stale_analysis_run,
+    ) -> None:
+        recover_stale_analysis_run.return_value = RecoveredAnalysisRun(
+            analysis_run_id=92,
+            attempt_number=1,
+            status=AnalysisRunStatus.FAILED,
+            operator="Victor",
+            reason="Worker terminated.",
+            started_at=datetime(2026, 7, 31, 10),
+            recovered_at=datetime(2026, 7, 31, 12),
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "recover-analysis",
+                "--analysis-run-id",
+                "92",
+                "--stale-after-minutes",
+                "60",
+                "--operator",
+                "Victor",
+                "--reason",
+                "Worker terminated.",
+            ],
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        recover_stale_analysis_run.assert_called_once_with(
+            analysis_run_id=92,
+            stale_after_minutes=60,
+            operator="Victor",
+            reason="Worker terminated.",
+        )
+        self.assertIn(
+            "analysis_run_id=92 attempt=1 status=failed recovered=true",
+            result.stdout,
+        )
+
     @patch("argus.interface.cli.get_analysis_run_result")
     def test_analysis_result_prints_hash_verified_payload(
             self,
