@@ -30,6 +30,11 @@ class SyntheticOriginCorpusIntakeCLITests(unittest.TestCase):
                 "--genre", "news",
                 "--source-group-id", "story-1",
                 "--reference", "https://example.test/story-1",
+                "--title", "Example story",
+                "--author", "Jane Reporter",
+                "--publisher", "Example Publisher",
+                "--published-date", "2013-05-14",
+                "--text-scope", "article-body",
                 "--retrieved-at", "2026-08-02T10:00:00Z",
                 "--acquisition-method", "publisher-export",
             ])
@@ -38,6 +43,38 @@ class SyntheticOriginCorpusIntakeCLITests(unittest.TestCase):
             self.assertTrue((workspace / "text/human/human-news-0001.txt").is_file())
             self.assertTrue((workspace / "records/human-news-0001.json").is_file())
         self.assertIn("label=human", result.stdout)
+        upgrade.assert_called_once_with()
+        configure.assert_called_once_with()
+
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_register_human_command_reports_invalid_timestamp_without_traceback(
+            self, upgrade, configure) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input.txt"
+            source.write_text("Affirmatively human source text.", encoding="utf-8")
+            result = runner.invoke(app, [
+                "register-human-corpus-source",
+                "--input-text", str(source),
+                "--workspace-root", str(root / "intake"),
+                "--source-id", "human-news-0001",
+                "--language", "en",
+                "--genre", "news",
+                "--source-group-id", "story-1",
+                "--reference", "https://example.test/story-1",
+                "--title", "Example story",
+                "--author", "Jane Reporter",
+                "--publisher", "Example Publisher",
+                "--published-date", "2013-05-14",
+                "--text-scope", "article-body",
+                "--retrieved-at", "not-a-timestamp",
+                "--acquisition-method", "manual-preservation",
+            ])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("retrieved_at must be RFC 3339", result.output)
+        self.assertNotIn("Traceback", result.output)
         upgrade.assert_called_once_with()
         configure.assert_called_once_with()
 

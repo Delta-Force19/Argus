@@ -25,7 +25,10 @@ letters, digits, `.`, `_` and `-` and cannot express filesystem traversal.
 ## Register a human source
 
 The operator must have affirmative human-authorship evidence and a durable
-reference to the preserved publication or archive record.
+reference to the preserved publication or archive record. Human intake also
+records the published title, byline, publisher, calendar date and the exact
+content boundary copied into the text artifact. A URL alone is not sufficient
+provenance for a calibration label.
 
 ```powershell
 $intake = ".\data\calibration\sources"
@@ -38,6 +41,11 @@ $intake = ".\data\calibration\sources"
     --genre "news" `
     --source-group-id "publisher-story-2026-0001" `
     --reference "https://publisher.example/article" `
+    --title "Published article title" `
+    --author "Published byline" `
+    --publisher "Publisher name" `
+    --published-date "2013-05-14" `
+    --text-scope "article-body" `
     --retrieved-at "2026-08-02T10:00:00Z" `
     --acquisition-method "publisher-export"
 ```
@@ -45,6 +53,42 @@ $intake = ".\data\calibration\sources"
 The command copies exact bytes to `text/human/` and creates one
 `synthetic-origin-source-record@1` sidecar under `records/`. It does not rewrite
 line endings or replace the supplied input file.
+
+`--reference` must be an absolute HTTP(S) publication or archive URL.
+`--published-date` preserves only the precision actually supplied by the
+publisher instead of inventing a midnight timestamp. `--text-scope` is one of
+`article-body`, `article-body-with-headline`, `full-document`, or
+`publisher-export`. For ordinary news pages, prefer `article-body`: omit site
+navigation, related-story cards, image captions, legal text and advertisements.
+
+For the first National Geographic corpus source:
+
+```powershell
+$retrievedAt = (Get-Date).ToUniversalTime().ToString(
+    "yyyy-MM-ddTHH:mm:ssZ",
+    [System.Globalization.CultureInfo]::InvariantCulture
+)
+
+& ".\.venv\Scripts\python.exe" main.py register-human-corpus-source `
+    --input-text ".\data\calibration\incoming\human-news-0001.txt" `
+    --workspace-root ".\data\calibration\sources" `
+    --source-id "human-national-geographic-2013-dog-genomes" `
+    --language "en" `
+    --genre "science-news" `
+    --source-group-id "national-geographic-130514-dogs-domestication" `
+    --reference "https://www.nationalgeographic.com/animals/article/130514-dogs-domestication-humans-genome-science" `
+    --title "Dog and Human Genomes Evolved Together" `
+    --author "Jane J. Lee" `
+    --publisher "National Geographic" `
+    --published-date "2013-05-14" `
+    --text-scope "article-body" `
+    --retrieved-at $retrievedAt `
+    --acquisition-method "manual-preservation-from-publisher-page"
+```
+
+The input artifact for this command contains the article body from the opening
+paragraph through the final paragraph. The headline, subtitle, author and date
+are structured provenance and are not duplicated into the body text.
 
 ## Register a synthetic source
 

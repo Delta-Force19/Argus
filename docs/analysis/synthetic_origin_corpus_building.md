@@ -35,16 +35,22 @@ Each manifest line is exactly one `synthetic-origin-source-record@1` object:
   "provenance": {
     "kind": "human_source",
     "reference": "https://publisher.example/article",
+    "title": "Published article title",
+    "author": "Published byline",
+    "publisher": "Publisher name",
+    "published_date": "2013-05-14",
+    "text_scope": "article-body",
     "retrieved_at": "2026-08-02T10:00:00Z",
     "acquisition_method": "publisher-export"
   }
 }
 ```
 
-Human provenance requires `kind=human_source`, a reference, an RFC 3339
-retrieval time and an acquisition method. A human label means that the source
-has affirmative human-origin evidence; it must not be assigned merely because
-no generator is known.
+Builder compatibility requires `kind=human_source`, a reference, an RFC 3339
+retrieval time and an acquisition method. The intake layer additionally
+requires title, author, publisher, publication date and text scope so a human
+calibration label is not justified by a bare URL. A human label must not be
+assigned merely because no generator is known.
 
 Synthetic records use the same top-level fields and require:
 

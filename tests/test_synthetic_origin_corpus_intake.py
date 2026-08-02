@@ -43,6 +43,11 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             genre="News",
             source_group_id="publisher-story-1",
             reference="https://example.test/story",
+            title="Example story",
+            author="Jane Reporter",
+            publisher="Example Publisher",
+            published_date="2013-05-14",
+            text_scope="article-body",
             retrieved_at="2026-08-02T10:00:00Z",
             acquisition_method="publisher-export",
         )
@@ -55,6 +60,10 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
         self.assertEqual(
             record["content_sha256"], sha256(source.read_bytes()).hexdigest()
         )
+        self.assertEqual(record["provenance"]["title"], "Example story")
+        self.assertEqual(record["provenance"]["author"], "Jane Reporter")
+        self.assertEqual(record["provenance"]["published_date"], "2013-05-14")
+        self.assertEqual(record["provenance"]["text_scope"], "article-body")
 
     def test_synthetic_registration_binds_text_prompt_and_generation_log(self) -> None:
         source = self._input("synthetic.txt", "Generated text.")
@@ -95,6 +104,11 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             genre="news",
             source_group_id="group-1",
             reference="https://example.test/1",
+            title="Story",
+            author="Reporter",
+            publisher="Publisher",
+            published_date="2013-05-14",
+            text_scope="article-body",
             retrieved_at="2026-08-02T10:00:00Z",
             acquisition_method="manual-export",
         )
@@ -105,6 +119,40 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             register_human_source(source, **arguments)
 
         self.assertEqual(first.text_path.read_bytes(), before)
+
+    def test_human_registration_rejects_weak_publication_provenance(self) -> None:
+        source = self._input("human.txt", "Original human text.")
+        arguments = dict(
+            workspace_root=self.workspace,
+            source_id="human-1",
+            language="en",
+            genre="science-news",
+            source_group_id="publisher-story-1",
+            title="Dog and Human Genomes Evolved Together",
+            author="Jane J. Lee",
+            publisher="National Geographic",
+            published_date="2013-05-14",
+            text_scope="article-body",
+            retrieved_at="2026-08-02T10:00:00Z",
+            acquisition_method="manual-preservation-from-publisher-page",
+        )
+
+        with self.assertRaisesRegex(ValueError, "absolute HTTP"):
+            register_human_source(source, reference="placeholder", **arguments)
+        with self.assertRaisesRegex(ValueError, "ISO 8601"):
+            register_human_source(
+                source,
+                reference="https://example.test/story",
+                **{**arguments, "published_date": "May 14, 2013"},
+            )
+        with self.assertRaisesRegex(ValueError, "text_scope"):
+            register_human_source(
+                source,
+                reference="https://example.test/story",
+                **{**arguments, "text_scope": "whatever-was-copied"},
+            )
+
+        self.assertFalse(self.workspace.exists())
 
     def test_unsafe_source_id_is_rejected_before_any_write(self) -> None:
         source = self._input("human.txt", "Human text.")
@@ -118,6 +166,11 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
                 genre="news",
                 source_group_id="group",
                 reference="https://example.test",
+                title="Story",
+                author="Reporter",
+                publisher="Publisher",
+                published_date="2013-05-14",
+                text_scope="article-body",
                 retrieved_at="2026-08-02T10:00:00Z",
                 acquisition_method="manual",
             )
@@ -160,6 +213,8 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             human, workspace_root=self.workspace,
             source_id="a-human", language="en", genre="news",
             source_group_id="human-group", reference="https://example.test/human",
+            title="Story", author="Reporter", publisher="Publisher",
+            published_date="2013-05-14", text_scope="article-body",
             retrieved_at="2026-08-02T10:00:00Z",
             acquisition_method="publisher-export",
         )
@@ -189,6 +244,8 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             source, workspace_root=self.workspace,
             source_id="human-1", language="en", genre="news",
             source_group_id="group", reference="https://example.test/human",
+            title="Story", author="Reporter", publisher="Publisher",
+            published_date="2013-05-14", text_scope="article-body",
             retrieved_at="2026-08-02T10:00:00Z", acquisition_method="export",
         )
         result.text_path.write_text("tampered", encoding="utf-8")
@@ -222,6 +279,37 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             )
 
         self.assertFalse((self.root / "manifest.jsonl").exists())
+
+    def test_manifest_assembly_accepts_v01_synthetic_generation_log(self) -> None:
+        source = self._input("synthetic.txt", _long_text("synthetic"))
+        prompt = self._input("prompt.txt", "Original prompt.")
+        result = register_synthetic_source(
+            source, prompt, workspace_root=self.workspace,
+            source_id="synthetic-1", language="en", genre="news",
+            source_group_id="group", generated_at="2026-08-02T10:00:00Z",
+            provider="provider", model="model", model_version="snapshot",
+            generation_parameters={"temperature": 0},
+        )
+        log = json.loads(result.generation_log_path.read_text(encoding="utf-8"))
+        log["intake_version"] = "provenance-intake-v0.1"
+        unhashed = dict(log)
+        unhashed.pop("log_hash")
+        canonical = json.dumps(
+            unhashed, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        log["log_hash"] = sha256(canonical).hexdigest()
+        result.generation_log_path.write_text(
+            json.dumps(log, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        summary = assemble_source_manifest(
+            workspace_root=self.workspace,
+            output_jsonl=self.root / "manifest.jsonl",
+            split_salt="intake-fixture-v1",
+        )
+
+        self.assertEqual(summary["records"], 1)
 
 
 if __name__ == "__main__":

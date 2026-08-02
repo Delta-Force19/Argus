@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from hashlib import sha256
 import json
 import os
@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Mapping
+from urllib.parse import urlsplit
 
 from argus.analysis.corpus_builder import (
     MAX_SOURCE_BYTES,
@@ -18,9 +19,19 @@ from argus.analysis.corpus_builder import (
 
 
 GENERATION_LOG_SCHEMA = "synthetic-origin-generation-log@1"
-INTAKE_VERSION = "provenance-intake-v0.1"
+INTAKE_VERSION = "provenance-intake-v0.2"
+SUPPORTED_GENERATION_INTAKE_VERSIONS = {
+    "provenance-intake-v0.1",
+    INTAKE_VERSION,
+}
 MAX_PROMPT_BYTES = 2_000_000
 _SOURCE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,99}$")
+_HUMAN_TEXT_SCOPES = {
+    "article-body",
+    "article-body-with-headline",
+    "full-document",
+    "publisher-export",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +54,11 @@ def register_human_source(
         genre: str,
         source_group_id: str,
         reference: str,
+        title: str,
+        author: str,
+        publisher: str,
+        published_date: str,
+        text_scope: str,
         retrieved_at: str,
         acquisition_method: str,
 ) -> IntakeRegistration:
@@ -57,6 +73,16 @@ def register_human_source(
         reference=reference,
     )
     _validate_timestamp(retrieved_at, field="retrieved_at")
+    _validate_publication_reference(reference)
+    for field, value in (
+            ("title", title), ("author", author), ("publisher", publisher)):
+        _require_text(value, field=field)
+    _validate_date(published_date, field="published_date")
+    if text_scope not in _HUMAN_TEXT_SCOPES:
+        raise ValueError(
+            "text_scope must be one of: "
+            + ", ".join(sorted(_HUMAN_TEXT_SCOPES)) + "."
+        )
     _require_text(acquisition_method, field="acquisition_method")
     content_hash = sha256(raw).hexdigest()
     relative_text = f"human/{source_id}.txt"
@@ -72,6 +98,11 @@ def register_human_source(
         "provenance": {
             "kind": "human_source",
             "reference": reference.strip(),
+            "title": title.strip(),
+            "author": author.strip(),
+            "publisher": publisher.strip(),
+            "published_date": published_date,
+            "text_scope": text_scope,
             "retrieved_at": retrieved_at,
             "acquisition_method": acquisition_method.strip(),
         },
@@ -249,8 +280,11 @@ def assemble_source_manifest(
 def _verify_intake_record(
         record: Mapping[str, object], *, workspace_root: Path,
 ) -> None:
-    if record.get("label") != "synthetic":
+    if record.get("label") == "human":
+        _verify_human_intake_record(record)
         return
+    if record.get("label") != "synthetic":
+        raise ValueError("Intake record label must be human or synthetic.")
     provenance = record.get("provenance")
     if not isinstance(provenance, dict):
         raise ValueError("Synthetic intake record provenance must be an object.")
@@ -278,7 +312,7 @@ def _verify_intake_record(
     }
     if set(log) != expected_log_fields \
             or log.get("schema") != GENERATION_LOG_SCHEMA \
-            or log.get("intake_version") != INTAKE_VERSION:
+            or log.get("intake_version") not in SUPPORTED_GENERATION_INTAKE_VERSIONS:
         raise ValueError("Synthetic generation log contract is invalid.")
     prompt_path = _safe_workspace_path(
         workspace_root, log.get("prompt_path"), kind="prompt"
@@ -308,6 +342,41 @@ def _verify_intake_record(
             "Synthetic generation log disagrees with source record: "
             + ", ".join(mismatched) + "."
         )
+
+
+def _verify_human_intake_record(record: Mapping[str, object]) -> None:
+    provenance = record.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("Human intake record provenance must be an object.")
+    required = {
+        "kind", "reference", "title", "author", "publisher",
+        "published_date", "text_scope", "retrieved_at", "acquisition_method",
+    }
+    missing = sorted(required - set(provenance))
+    if missing:
+        raise ValueError(
+            "Human intake record provenance is missing: "
+            + ", ".join(missing) + "."
+        )
+    if provenance.get("kind") != "human_source":
+        raise ValueError("Human intake record provenance kind is invalid.")
+    for field in ("title", "author", "publisher", "acquisition_method"):
+        _require_text(provenance.get(field), field=field)
+    reference = provenance.get("reference")
+    if not isinstance(reference, str):
+        raise ValueError("reference must be a string.")
+    _validate_publication_reference(reference)
+    published_date = provenance.get("published_date")
+    if not isinstance(published_date, str):
+        raise ValueError("published_date must be a string.")
+    _validate_date(published_date, field="published_date")
+    text_scope = provenance.get("text_scope")
+    if text_scope not in _HUMAN_TEXT_SCOPES:
+        raise ValueError("Human intake record text_scope is invalid.")
+    retrieved_at = provenance.get("retrieved_at")
+    if not isinstance(retrieved_at, str):
+        raise ValueError("retrieved_at must be a string.")
+    _validate_timestamp(retrieved_at, field="retrieved_at")
 
 
 def _safe_workspace_path(root: Path, value: object, *, kind: str) -> Path:
@@ -352,6 +421,25 @@ def _validate_timestamp(value: str, *, field: str) -> None:
         raise ValueError(f"{field} must be RFC 3339.") from error
     if parsed.tzinfo is None:
         raise ValueError(f"{field} must include a timezone.")
+
+
+def _validate_date(value: str, *, field: str) -> None:
+    _require_text(value, field=field)
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{field} must be an ISO 8601 calendar date.") from error
+    if parsed.isoformat() != value:
+        raise ValueError(f"{field} must use YYYY-MM-DD format.")
+
+
+def _validate_publication_reference(value: str) -> None:
+    _require_text(value, field="reference")
+    parsed = urlsplit(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("reference must be an absolute HTTP(S) publication URL.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("reference must not contain URL credentials.")
 
 
 def _load_utf8_artifact(path: Path, *, kind: str, limit: int) -> bytes:

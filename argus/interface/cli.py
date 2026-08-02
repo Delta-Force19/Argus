@@ -1640,6 +1640,16 @@ def register_human_corpus_source(
         reference: str = typer.Option(
             ..., "--reference", help="Preserved publication or archive reference.",
         ),
+        title: str = typer.Option(..., "--title", help="Published title."),
+        author: str = typer.Option(..., "--author", help="Published byline."),
+        publisher: str = typer.Option(..., "--publisher"),
+        published_date: str = typer.Option(
+            ..., "--published-date", help="Publication date in YYYY-MM-DD format.",
+        ),
+        text_scope: str = typer.Option(
+            ..., "--text-scope",
+            help="Preserved content boundary, such as article-body.",
+        ),
         retrieved_at: str = typer.Option(
             ..., "--retrieved-at", help="RFC 3339 retrieval time with timezone.",
         ),
@@ -1649,17 +1659,25 @@ def register_human_corpus_source(
 ) -> None:
     """Register one provenance-supported human corpus source."""
 
-    result = register_human_source(
-        input_text,
-        workspace_root=workspace_root,
-        source_id=source_id,
-        language=language,
-        genre=genre,
-        source_group_id=source_group_id,
-        reference=reference,
-        retrieved_at=retrieved_at,
-        acquisition_method=acquisition_method,
-    )
+    try:
+        result = register_human_source(
+            input_text,
+            workspace_root=workspace_root,
+            source_id=source_id,
+            language=language,
+            genre=genre,
+            source_group_id=source_group_id,
+            reference=reference,
+            title=title,
+            author=author,
+            publisher=publisher,
+            published_date=published_date,
+            text_scope=text_scope,
+            retrieved_at=retrieved_at,
+            acquisition_method=acquisition_method,
+        )
+    except (ValueError, FileExistsError) as error:
+        raise typer.BadParameter(str(error)) from error
     typer.echo(
         f"source_id={result.source_id!r} label={result.label} "
         f"content_sha256={result.content_sha256}"
