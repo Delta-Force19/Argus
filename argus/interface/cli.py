@@ -5,6 +5,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import typer
 
+from argus.analysis.calibration import (
+    calibrate_threshold,
+    corpus_summary,
+    evaluate_test_split,
+    load_calibration_corpus,
+    write_canonical_json,
+)
 from argus.logging.logger import configure_logging
 from argus.services.acquisition_batch_runner import (
     AcquisitionBatchItemStatus,
@@ -85,6 +92,9 @@ from argus.services.document_analysis_input_service import (
     get_document_analysis_input,
 )
 from argus.services.analysis_run_service import prepare_analysis_run
+from argus.services.software_provenance_service import (
+    resolve_software_provenance,
+)
 from argus.services.analysis_execution_service import (
     execute_analysis_run,
     get_analysis_evidence,
@@ -1601,6 +1611,136 @@ def analysis_evidence(
                 separators=(",", ":"),
             )
         )
+
+
+@app.command()
+def validate_synthetic_corpus(
+        input_jsonl: Path = typer.Option(
+            ...,
+            "--input-jsonl",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Immutable JSONL corpus to validate and fingerprint.",
+        ),
+) -> None:
+    """Validate labels, provenance, split isolation and corpus identity."""
+
+    summary = corpus_summary(load_calibration_corpus(input_jsonl))
+    typer.echo(
+        f"schema={summary['schema']!r} corpus_hash={summary['corpus_hash']} "
+        f"samples={summary['samples']} eligible={summary['eligible_samples']}"
+    )
+    typer.echo(
+        "labels=" + json.dumps(summary["labels"], sort_keys=True)
+        + " splits=" + json.dumps(summary["splits"], sort_keys=True)
+    )
+    typer.echo(
+        "languages=" + json.dumps(summary["languages"], sort_keys=True)
+        + " genres=" + json.dumps(summary["genres"], sort_keys=True)
+    )
+    typer.echo(
+        "split_hashes="
+        + json.dumps(summary["split_hashes"], sort_keys=True)
+    )
+
+
+@app.command()
+def calibrate_synthetic_origin(
+        input_jsonl: Path = typer.Option(
+            ...,
+            "--input-jsonl",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Validated JSONL corpus with an isolated calibration split.",
+        ),
+        output_json: Path = typer.Option(
+            ...,
+            "--output-json",
+            dir_okay=False,
+            help="New canonical threshold-decision JSON file.",
+        ),
+) -> None:
+    """Select and bind a threshold using only the calibration split."""
+
+    if output_json.exists():
+        raise typer.BadParameter("output-json already exists.")
+    decision = calibrate_threshold(
+        load_calibration_corpus(input_jsonl),
+        software_version=resolve_software_provenance().software_version,
+    )
+    write_canonical_json(output_json, decision)
+    typer.echo(
+        f"schema={decision['schema']!r} method={decision['method']!r} "
+        f"method_version={decision['method_version']!r} "
+        f"threshold={decision['threshold']} "
+        f"decision_hash={decision['decision_hash']}"
+    )
+    typer.echo(f"output={str(output_json)!r}")
+
+
+@app.command()
+def evaluate_synthetic_origin(
+        input_jsonl: Path = typer.Option(
+            ...,
+            "--input-jsonl",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Exact JSONL corpus bound by the threshold decision.",
+        ),
+        threshold_json: Path = typer.Option(
+            ...,
+            "--threshold-json",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Hash-verified threshold selected on calibration only.",
+        ),
+        output_json: Path = typer.Option(
+            ...,
+            "--output-json",
+            dir_okay=False,
+            help="New canonical held-out evaluation report JSON file.",
+        ),
+) -> None:
+    """Measure held-out errors without changing the selected threshold."""
+
+    if output_json.exists():
+        raise typer.BadParameter("output-json already exists.")
+    try:
+        decision = json.loads(threshold_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise typer.BadParameter("threshold-json must be valid JSON.") from error
+    if not isinstance(decision, dict):
+        raise typer.BadParameter("threshold-json must contain one JSON object.")
+    report = evaluate_test_split(
+        load_calibration_corpus(input_jsonl),
+        decision,
+        software_version=resolve_software_provenance().software_version,
+    )
+    write_canonical_json(output_json, report)
+    metrics = report["overall"]
+    fpr = metrics["false_positive_rate"]
+    fnr = metrics["false_negative_rate"]
+    typer.echo(
+        f"schema={report['schema']!r} method={report['method']!r} "
+        f"method_version={report['method_version']!r} "
+        f"threshold={report['threshold']} samples={metrics['samples']}"
+    )
+    typer.echo(
+        f"roc_auc={metrics['roc_auc']} "
+        f"balanced_accuracy={metrics['balanced_accuracy']} "
+        f"false_positive_rate={fpr['rate']} "
+        f"false_negative_rate={fnr['rate']} "
+        f"sufficient={str(metrics['sufficient_sample_size']).lower()}"
+    )
+    typer.echo(
+        f"test_split_hash={report['test_split_hash']} "
+        f"report_hash={report['report_hash']}"
+    )
+    typer.echo(f"output={str(output_json)!r}")
 
 
 @app.command()

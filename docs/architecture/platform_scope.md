@@ -113,6 +113,13 @@ long English inputs. Its conclusion remains `inconclusive`, it never emits a
 as source-located evidence. This baseline is for exploratory ranking and
 contract validation, not authorship accusation.
 
+Argus also includes an offline calibration harness for labelled English text.
+It fingerprints provenance-bearing samples and immutable
+train/calibration/test splits, prevents source-group leakage, and reports
+held-out false-positive rates overall and by represented genre. The harness
+does not turn the current score into a probability or enable stronger runtime
+conclusions automatically.
+
 C2PA and media forensics follow only after image, audio and video artifacts
 have immutable input manifests and verifiable locator contracts. No detector
 may write a conclusion without exposing its evidence and uncertainty.

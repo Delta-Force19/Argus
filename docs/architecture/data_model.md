@@ -1170,6 +1170,15 @@ stored as `synthetic-origin-text-evidence@1`; they are never represented as
 proof of synthetic authorship. The allowed conclusion vocabulary intentionally
 has no `verified_human` value.
 
+Calibration artifacts are intentionally outside operational `AnalysisRun`
+storage. A `synthetic-origin-calibration-sample@1` JSONL corpus binds exact
+text, label, provenance, language, genre, source group and immutable split.
+Canonical hashes identify every sample, split and corpus. A
+`synthetic-origin-threshold@1` decision binds a threshold to one method version
+and calibration split; a `synthetic-origin-evaluation@1` report binds held-out
+metrics to the same corpus and untouched test split. This prevents benchmark
+experiments from being mistaken for analysis of collected documents.
+
 ### Analysis execution attempt
 
 `AnalysisExecutionAttempt` is the append-only audit record for one claimed

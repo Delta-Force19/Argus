@@ -178,9 +178,12 @@ remain fail-closed until their source manifests and locator validators exist.
 The structural synthetic-origin baseline is deliberately not a probability
 model. It can produce a bounded `detector_score` only for English inputs with
 at least 250 words and 10 sentences, always returns `inconclusive`, and records
-that the score is uncalibrated. A later method version may emit stronger
-conclusions only after evaluation data establishes language-, genre- and
-condition-specific calibration and error rates.
+that the score is uncalibrated. The implemented calibration harness validates
+hash-addressed JSONL corpora, keeps source groups inside immutable
+train/calibration/test splits, selects a threshold on calibration only, and
+measures held-out errors overall and by language and genre. A later method
+version may emit stronger conclusions only after those reports establish
+condition-specific calibration and acceptable false-positive rates.
 
 ## Current Limitation
 

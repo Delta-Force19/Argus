@@ -801,6 +801,13 @@ an uncalibrated `detector_score`; every result remains `inconclusive`, carries
 limitations, and sets `synthetic_probability=null` and
 `probability_is_calibrated=false`.
 
+Calibration follows a separate fail-closed flow: validate and fingerprint the
+labelled corpus, select an operating threshold from `calibration`, freeze a
+hash-bound threshold decision, then evaluate that unchanged decision on
+`test`. Related samples sharing a source group cannot cross splits. The report
+publishes false-positive and false-negative rates, uncertainty intervals and
+language/genre slices, but does not alter operational analysis conclusions.
+
 The read-only `argus latest-news` entrypoint exposes the first user-facing view
 over the legacy article collection. It orders articles by recorded publication
 time, places missing publication times after known ones and uses fetch time and
