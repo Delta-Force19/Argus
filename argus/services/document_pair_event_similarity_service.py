@@ -12,6 +12,9 @@ from argus.services.document_analysis_input_service import (
     DocumentAnalysisInputBundle,
     build_document_analysis_input,
 )
+from argus.services.event_text_readiness_service import (
+    assess_event_text_readiness,
+)
 
 
 _WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
@@ -191,6 +194,18 @@ def _validate_pair(
         raise ValueError("Two distinct document versions are required.")
     if left.document.document_id == right.document.document_id:
         raise ValueError("Two distinct documents are required.")
+    for side, bundle in (("left", left), ("right", right)):
+        readiness = assess_event_text_readiness(
+            identifier_scheme=bundle.document.identifier_scheme,
+            identifier_value=bundle.document.identifier_value,
+            artifact_type=bundle.text.artifact_type,
+            text=bundle.text.text,
+        )
+        if not readiness.ready_for_event_analysis:
+            raise ValueError(
+                f"{side.capitalize()} event-analysis text is blocked: "
+                + " ".join(readiness.reasons)
+            )
 
 
 def _temporal_signal(

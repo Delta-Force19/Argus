@@ -10,6 +10,18 @@ from argus.services.event_fragment_segmentation_service import (
     EventFragmentSegmentationReport,
     TextBlockView,
 )
+from argus.services.event_text_readiness_service import (
+    EventTextReadiness,
+    EventTextReadinessStatus,
+)
+
+
+READY = EventTextReadiness(
+    status=EventTextReadinessStatus.READY,
+    ready_for_event_analysis=True,
+    reasons=(),
+    limitations=(),
+)
 
 
 class EventFragmentSegmentationCliTests(unittest.TestCase):
@@ -37,6 +49,7 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
                     heading_candidate=True,
                 ),
             ),
+            event_text_readiness=READY,
         )
 
         result = CliRunner().invoke(
@@ -82,6 +95,7 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
                     quality_limitations=("Not an event decision.",),
                 ),
             ),
+            event_text_readiness=READY,
         )
 
         result = CliRunner().invoke(

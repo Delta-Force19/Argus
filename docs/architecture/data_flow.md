@@ -735,6 +735,12 @@ source-anchored candidates through the existing idempotent fragment service;
 it never creates an event or assignment. Ambiguous text artifacts and damaged
 text payloads fail closed.
 
+The same boundary checks event-content readiness. HTML extracted from a video
+page remains a valid reproducible record of that page, but it is blocked from
+event comparison and fragment persistence until a source-anchored transcript
+exists. This prevents a teaser or generic description from being represented
+as the content of the audiovisual report.
+
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
 transaction. The row records the exact

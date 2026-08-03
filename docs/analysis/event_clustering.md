@@ -66,3 +66,16 @@ cluster, claims that every candidate describes one event, or claims that the
 document was completely or correctly segmented. A first-class
 `SegmentationRun`, richer boundary evidence and calibrated evaluation remain
 planned.
+
+## Event-content readiness
+
+Event analysis must distinguish source content from page metadata. Text
+extracted from the HTML surrounding an audiovisual item is not evidence that
+the speech or events in the item were captured. When a document URI identifies
+a video page, Argus requires a `transcript` artifact before that text may be
+persisted as event-fragment candidates or used for document-pair similarity.
+
+Short length and missing paragraph separators remain warnings rather than hard
+failures: a brief article can still be complete. Readiness therefore blocks
+only the demonstrable source-medium mismatch, while exposing weaker quality
+signals for review.

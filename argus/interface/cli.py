@@ -1576,8 +1576,16 @@ def inspect_document_text_blocks(
         f"document_version_id={report.document_version_id} "
         f"text_artifact_id={report.text_derived_artifact_id} "
         f"character_count={report.character_count} "
-        f"text_hash={report.text_hash} blocks={len(report.blocks)}"
+        f"text_hash={report.text_hash} blocks={len(report.blocks)} "
+        "event_text_readiness="
+        f"{report.event_text_readiness.status.value!r} "
+        "ready_for_event_analysis="
+        f"{str(report.event_text_readiness.ready_for_event_analysis).lower()}"
     )
+    for reason in report.event_text_readiness.reasons:
+        typer.echo(f"event_text_blocker={reason!r}")
+    for limitation in report.event_text_readiness.limitations:
+        typer.echo(f"event_text_limitation={limitation!r}")
     for block in report.blocks:
         preview = block.text
         truncated = len(preview) > max_block_chars
@@ -1630,6 +1638,10 @@ def segment_event_fragments_command(
         f"method={report.method!r} "
         f"method_version={report.method_version!r} "
         f"boundary_basis={report.boundary_basis!r} "
+        "event_text_readiness="
+        f"{report.event_text_readiness.status.value!r} "
+        "ready_for_event_analysis="
+        f"{str(report.event_text_readiness.ready_for_event_analysis).lower()} "
         "event_assignments=0"
     )
     for index, item in enumerate(report.items, start=1):

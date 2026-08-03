@@ -141,6 +141,50 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
                 session_factory=self._session,
             )
 
+    def test_video_html_can_be_previewed_but_not_persisted(self) -> None:
+        version = self._version("video/bulletin")
+        self._artifact(version, "Generic video page description.")
+        self.session.commit()
+
+        preview = segment_event_fragments(
+            document_version_id=version.id,
+            session_factory=self._session,
+        )
+
+        self.assertFalse(
+            preview.event_text_readiness.ready_for_event_analysis
+        )
+        self.assertTrue(any(
+            "not a transcript" in value
+            for value in preview.items[0].quality_limitations
+        ))
+        with self.assertRaisesRegex(ValueError, "persistence is blocked"):
+            segment_event_fragments(
+                document_version_id=version.id,
+                persist=True,
+                session_factory=self._session,
+            )
+
+    def test_video_transcript_can_be_persisted(self) -> None:
+        version = self._version("video/bulletin-transcript")
+        self._artifact(
+            version,
+            "First reported event in the bulletin.",
+            artifact_type=DerivedArtifactType.TRANSCRIPT,
+        )
+        self.session.commit()
+
+        report = segment_event_fragments(
+            document_version_id=version.id,
+            persist=True,
+            session_factory=self._session,
+        )
+
+        self.assertTrue(report.persisted)
+        self.assertTrue(
+            report.event_text_readiness.ready_for_event_analysis
+        )
+
     def test_requires_explicit_artifact_when_multiple_are_available(self) -> None:
         other = self._artifact(
             self.version,

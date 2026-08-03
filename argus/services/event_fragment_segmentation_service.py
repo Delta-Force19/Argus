@@ -6,7 +6,11 @@ import re
 from sqlalchemy.orm import Session
 
 from argus.database import SessionLocal
-from argus.models import DerivedArtifact, DocumentVersion
+from argus.models import DerivedArtifact, Document, DocumentVersion
+from argus.services.event_text_readiness_service import (
+    EventTextReadiness,
+    assess_event_text_readiness,
+)
 from argus.services.event_fragment_service import (
     SUPPORTED_TEXT_TYPES,
     register_event_fragment_candidate,
@@ -40,6 +44,7 @@ class DocumentTextInspection:
     character_count: int
     text_hash: str
     blocks: tuple[TextBlockView, ...]
+    event_text_readiness: EventTextReadiness
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +66,7 @@ class EventFragmentSegmentationReport:
     persisted: bool
     boundary_basis: str
     items: tuple[EventFragmentProposal, ...]
+    event_text_readiness: EventTextReadiness
 
     @property
     def fragment_count(self) -> int:
@@ -76,7 +82,7 @@ def inspect_document_text(
     """Expose exact paragraph-block offsets without changing stored state."""
 
     with session_factory() as session:
-        artifact, text = _select_text_source(
+        document, artifact, text = _select_text_source(
             session,
             document_version_id=document_version_id,
             text_derived_artifact_id=text_derived_artifact_id,
@@ -98,6 +104,7 @@ def inspect_document_text(
             character_count=len(text),
             text_hash=_hash(text),
             blocks=blocks,
+            event_text_readiness=_readiness(document, artifact, text),
         )
 
 
@@ -111,13 +118,23 @@ def segment_event_fragments(
     """Propose conservative structural spans and optionally persist them."""
 
     with session_factory() as session:
-        artifact, text = _select_text_source(
+        document, artifact, text = _select_text_source(
             session,
             document_version_id=document_version_id,
             text_derived_artifact_id=text_derived_artifact_id,
         )
+        readiness = _readiness(document, artifact, text)
+        if persist and not readiness.ready_for_event_analysis:
+            raise ValueError(
+                "Event fragment persistence is blocked: "
+                + " ".join(readiness.reasons)
+            )
         spans, boundary_basis = _propose_spans(text)
-        limitations = _limitations(boundary_basis)
+        limitations = (
+            _limitations(boundary_basis)
+            + readiness.reasons
+            + readiness.limitations
+        )
         items: list[EventFragmentProposal] = []
         try:
             for index, (start, end) in enumerate(spans, start=1):
@@ -163,6 +180,7 @@ def segment_event_fragments(
             persisted=persist,
             boundary_basis=boundary_basis,
             items=tuple(items),
+            event_text_readiness=readiness,
         )
 
 
@@ -171,14 +189,18 @@ def _select_text_source(
         *,
         document_version_id: int,
         text_derived_artifact_id: int | None,
-) -> tuple[DerivedArtifact, str]:
+) -> tuple[Document, DerivedArtifact, str]:
     artifacts = DerivedArtifactRepository(session).get_for_version(
         document_version_id
     )
-    if session.get(DocumentVersion, document_version_id) is None:
+    version = session.get(DocumentVersion, document_version_id)
+    if version is None:
         raise ValueError(
             f"Document version does not exist: {document_version_id}."
         )
+    document = session.get(Document, version.document_id)
+    if document is None:
+        raise ValueError("Document version references a missing document.")
     supported = [
         item for item in artifacts if item.artifact_type in SUPPORTED_TEXT_TYPES
     ]
@@ -219,7 +241,20 @@ def _select_text_source(
             or character_count != len(text)
     ):
         raise ValueError("Derived text payload is inconsistent.")
-    return artifact, text
+    return document, artifact, text
+
+
+def _readiness(
+        document: Document,
+        artifact: DerivedArtifact,
+        text: str,
+) -> EventTextReadiness:
+    return assess_event_text_readiness(
+        identifier_scheme=document.identifier_scheme,
+        identifier_value=document.identifier_value,
+        artifact_type=artifact.artifact_type,
+        text=text,
+    )
 
 
 def _paragraph_spans(text: str) -> tuple[tuple[int, int], ...]:

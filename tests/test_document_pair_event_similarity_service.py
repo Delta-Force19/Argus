@@ -141,6 +141,19 @@ class DocumentPairEventSimilarityServiceTests(unittest.TestCase):
                     temporal_window_hours=0,
                 ),
             )
+
+    def test_rejects_video_page_html_without_transcript(self) -> None:
+        left = self._bundle(
+            document_id=1,
+            document_version_id=11,
+            published_at=self.published_at,
+            text="Generic bulletin description.",
+            entity_ids=(1,),
+            identifier_value="https://example.test/video/bulletin",
+        )
+
+        with self.assertRaisesRegex(ValueError, "not a transcript"):
+            compare_document_pair_event_similarity(left, self.right)
         with self.assertRaisesRegex(ValueError, "cannot be negative"):
             compare_document_pair_event_similarity(
                 self.left,
@@ -235,6 +248,7 @@ class DocumentPairEventSimilarityServiceTests(unittest.TestCase):
             published_at: datetime | None,
             text: str,
             entity_ids: tuple[int, ...],
+            identifier_value: str | None = None,
     ) -> DocumentAnalysisInputBundle:
         entities = tuple(
             DocumentResolvedEntity(
@@ -256,7 +270,8 @@ class DocumentPairEventSimilarityServiceTests(unittest.TestCase):
                 document_type=DocumentType.ARTICLE,
                 identifier_scheme="url",
                 identifier_value=(
-                    f"https://example.test/{document_id}"
+                    identifier_value
+                    or f"https://example.test/{document_id}"
                 ),
                 title=f"Document {document_id}",
                 language="en",
