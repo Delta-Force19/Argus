@@ -1062,6 +1062,34 @@ should carry the same artifact identifier.
 The bundle is a read model only. It introduces no table, cache, readiness flag
 or mutable analysis state.
 
+### Document-pair event similarity evidence
+
+`DocumentPairEventSimilarity` is a detached, read-only comparison of two
+distinct ready document bundles. It is an evidence layer before event
+reconstruction, not an `Event`, cluster assignment, probability or assertion
+that both documents describe one real-world occurrence.
+
+The current deterministic method exposes three signals independently:
+
+- publication-time proximity with linear decay over an explicit window;
+- Jaccard overlap of safe resolved entity identifiers;
+- cosine similarity of normalized term-frequency vectors from the exact text
+  artifacts.
+
+Each signal records whether it was available, its score, configured weight,
+renormalized effective weight, contribution and formula-specific explanation.
+Missing timestamps, an empty resolved-entity union or texts below the lexical
+token floor make the corresponding signal unavailable. An unavailable signal
+is omitted and the remaining weights are renormalized; it is never silently
+converted to a zero-similarity observation.
+
+The combined score is explicitly uncalibrated. It has no same-event threshold
+and must not be persisted as an event assignment. Input text-quality limits
+are carried into the result, and the lexical method warns that boilerplate or
+general topic vocabulary may inflate similarity. A later corpus-backed
+calibration step may replace the heuristic weights and introduce candidate
+generation, but only after evaluation on labeled document pairs.
+
 ### Analysis run
 
 `AnalysisRun` is the immutable input contract and mutable execution ledger for

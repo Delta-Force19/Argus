@@ -102,6 +102,10 @@ from argus.services.ready_document_selector_service import (
 from argus.services.document_analysis_input_service import (
     get_document_analysis_input,
 )
+from argus.services.document_pair_event_similarity_service import (
+    EventSimilarityConfiguration,
+    get_document_pair_event_similarity,
+)
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import (
     resolve_software_provenance,
@@ -1427,6 +1431,70 @@ def document_analysis_input(
             f"revision={item.revision} scope={item.scope} "
             f"reviewer={item.reviewer!r} reason={item.reason!r}"
         )
+
+
+@app.command()
+def compare_document_event_similarity(
+        left_document_version_id: int = typer.Option(
+            ...,
+            "--left-document-version-id",
+            min=1,
+            help="First exact ready document version.",
+        ),
+        right_document_version_id: int = typer.Option(
+            ...,
+            "--right-document-version-id",
+            min=1,
+            help="Second exact ready document version.",
+        ),
+        temporal_window_hours: float = typer.Option(
+            72.0,
+            "--temporal-window-hours",
+            min=0.000001,
+            help="Linear temporal-decay window in hours.",
+        ),
+) -> None:
+    """Show explainable pair evidence without assigning an event."""
+
+    try:
+        result = get_document_pair_event_similarity(
+            left_document_version_id=left_document_version_id,
+            right_document_version_id=right_document_version_id,
+            configuration=EventSimilarityConfiguration(
+                temporal_window_hours=temporal_window_hours,
+            ),
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"left_document_version_id={result.left_document_version_id} "
+        f"left_document_id={result.left_document_id} "
+        f"right_document_version_id={result.right_document_version_id} "
+        f"right_document_id={result.right_document_id}"
+    )
+    typer.echo(
+        "combined_score="
+        f"{result.combined_score if result.combined_score is not None else 'none'} "
+        f"available_weight={result.available_weight} "
+        "same_event_decision=none"
+    )
+    shared_entity_ids = ",".join(
+        str(item) for item in result.shared_entity_ids
+    ) or "none"
+    typer.echo(f"shared_entity_ids={shared_entity_ids}")
+    for signal in result.signals:
+        typer.echo(
+            f"signal={signal.name!r} "
+            f"available={str(signal.available).lower()} "
+            f"score={signal.score if signal.score is not None else 'none'} "
+            f"configured_weight={signal.configured_weight} "
+            f"effective_weight={signal.effective_weight} "
+            "contribution="
+            f"{signal.contribution if signal.contribution is not None else 'none'} "
+            f"explanation={signal.explanation!r}"
+        )
+    for limitation in result.limitations:
+        typer.echo(f"limitation={limitation!r}")
 
 
 @app.command()

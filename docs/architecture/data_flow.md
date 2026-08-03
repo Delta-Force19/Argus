@@ -713,6 +713,20 @@ The bundle is emitted only at strict `ready` coverage and includes every
 resolved entity and occurrence, so no display limit can truncate analytical
 input. It stores no new readiness, projection or bundle row.
 
+`argus compare-document-event-similarity` is the first cross-document event
+evidence entrypoint. It builds both strict bundles in one database session,
+then reports publication-time, safe-entity and lexical similarity separately.
+It also reports the exact shared entity identifiers, signal availability,
+weights, contributions and limitations. The command always prints
+`same_event_decision=none`: no row is written and no `Event` identity is
+created at this stage.
+
+This separation keeps event reconstruction falsifiable. Pair evidence can be
+inspected and later calibrated without allowing one opaque aggregate score to
+become the source of truth. Missing evidence is represented as unavailable,
+not as negative evidence, while incomplete or unsafe entity resolution still
+fails closed when either analysis bundle is built.
+
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
 transaction. The row records the exact
