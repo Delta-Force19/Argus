@@ -85,7 +85,16 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(acquisition.external_identifier, "track-en")
         self.assertEqual(artifact.artifact_type, DerivedArtifactType.TRANSCRIPT)
         self.assertEqual(
-            artifact.payload["text"], "First story.\n\nSecond story."
+            artifact.payload["text"], "First story. Second story."
+        )
+        self.assertEqual(artifact.method_version, "2")
+        self.assertEqual(
+            artifact.payload["normalization"],
+            {
+                "strategy": "timing-aware-caption-rollup",
+                "cue_count": 2,
+                "removed_overlap_word_count": 0,
+            },
         )
         self.assertEqual(
             artifact.payload["source"]["content_hash"],
@@ -97,6 +106,53 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
                 result.raw_artifact_id,
             ).storage_key
         ), content)
+
+    def test_collapses_exact_overlap_from_rolling_webvtt_cues(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:04.000\n"
+            b"At least 25 people were killed by\n\n"
+            b"00:00:02.000 --> 00:00:06.000\n"
+            b"At least 25 people were killed by Israeli air strikes\n\n"
+            b"00:00:04.000 --> 00:00:08.000\n"
+            b"Israeli air strikes and gunshots overnight.\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "At least 25 people were killed by Israeli air strikes and "
+            "gunshots overnight.",
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            10,
+        )
+        self.assertNotIn("\n", artifact.payload["text"])
+
+    def test_preserves_repetition_across_non_overlapping_cues(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:01.000\nNever again.\n\n"
+            b"00:00:01.000 --> 00:00:02.000\nNever again.\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"], "Never again. Never again."
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            0,
+        )
 
     def test_same_acquisition_is_idempotent(self) -> None:
         first = self._ingest(

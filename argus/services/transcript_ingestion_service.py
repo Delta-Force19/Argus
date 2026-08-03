@@ -22,11 +22,26 @@ from argus.transcripts import TranscriptFormat, TranscriptKind
 
 
 _TIMING_LINE = re.compile(
-    r"^\s*(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}\s+-->\s+"
-    r"(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}(?:\s+.*)?$"
+    r"^\s*((?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3})\s+-->\s+"
+    r"((?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3})(?:\s+.*)?$"
 )
 _CUE_TAG = re.compile(r"<[^>]+>")
 _BCP47 = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
+_MIN_PARTIAL_OVERLAP_WORDS = 2
+
+
+@dataclass(frozen=True, slots=True)
+class _CaptionCue:
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedTranscript:
+    text: str
+    limitations: tuple[str, ...]
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +67,7 @@ class TranscriptIngestionService:
     """
 
     METHOD = "deterministic-transcript-normalization"
-    METHOD_VERSION = "1"
+    METHOD_VERSION = "2"
     SCHEMA_VERSION = "1"
 
     def __init__(
@@ -104,11 +119,11 @@ class TranscriptIngestionService:
         }.items():
             if not value.strip():
                 raise ValueError(f"{name} must not be blank.")
-        text, normalization_limitations = _normalize_transcript(
+        normalized = _normalize_transcript(
             content, transcript_format
         )
         limitations = tuple(dict.fromkeys(
-            (*normalization_limitations, *additional_quality_limitations)
+            (*normalized.limitations, *additional_quality_limitations)
         ))
         stored = self._artifact_store.store(content)
         raw_artifact = self._raw_repository.get_or_create(stored)
@@ -133,11 +148,12 @@ class TranscriptIngestionService:
             method_version=self.METHOD_VERSION,
             schema_version=self.SCHEMA_VERSION,
             payload={
-                "text": text,
-                "character_count": len(text),
+                "text": normalized.text,
+                "character_count": len(normalized.text),
                 "language": normalized_language,
                 "transcript_kind": transcript_kind.value,
                 "transcript_format": transcript_format.value,
+                "normalization": normalized.metadata,
                 "source": {
                     "transcript_acquisition_id": acquisition.id,
                     "raw_artifact_id": raw_artifact.id,
@@ -153,7 +169,7 @@ class TranscriptIngestionService:
             artifact=artifact,
             raw_artifact_id=raw_artifact.id,
             raw_content_hash=raw_artifact.content_hash,
-            text=text,
+            text=normalized.text,
             language=normalized_language,
             transcript_kind=transcript_kind,
             transcript_format=transcript_format,
@@ -228,7 +244,7 @@ def read_transcript_file(path: Path) -> bytes:
 def _normalize_transcript(
         content: bytes,
         transcript_format: TranscriptFormat,
-) -> tuple[str, tuple[str, ...]]:
+) -> _NormalizedTranscript:
     if not content:
         raise ValueError("Transcript content must not be empty.")
     try:
@@ -241,20 +257,38 @@ def _normalize_transcript(
         limitations = (
             "Plain-text input has no machine-verifiable cue timing.",
         )
+        metadata = {
+            "strategy": "plain-text-trim",
+        }
     else:
-        text = _caption_text(decoded, transcript_format)
-        limitations = (
-            "Cue timing is preserved only in the immutable raw artifact; "
-            "the normalized analytical text omits timestamps.",
+        text, cue_count, removed_overlap_word_count = _caption_text(
+            decoded, transcript_format
         )
+        limitations = (
+            "Cue timing and technical cue boundaries are preserved only in "
+            "the immutable raw artifact; the normalized analytical text "
+            "omits them.",
+        )
+        metadata = {
+            "strategy": "timing-aware-caption-rollup",
+            "cue_count": cue_count,
+            "removed_overlap_word_count": removed_overlap_word_count,
+        }
     if not text:
         raise ValueError("Transcript normalization produced no text.")
-    return text, limitations
+    return _NormalizedTranscript(
+        text=text,
+        limitations=limitations,
+        metadata=metadata,
+    )
 
 
-def _caption_text(text: str, transcript_format: TranscriptFormat) -> str:
+def _caption_text(
+        text: str,
+        transcript_format: TranscriptFormat,
+) -> tuple[str, int, int]:
     blocks = re.split(r"\n[ \t]*\n", text.strip())
-    cues: list[str] = []
+    cues: list[_CaptionCue] = []
     for index, block in enumerate(blocks):
         lines = [line.strip() for line in block.split("\n")]
         if transcript_format is TranscriptFormat.WEBVTT and index == 0:
@@ -264,10 +298,14 @@ def _caption_text(text: str, transcript_format: TranscriptFormat) -> str:
             continue
         if lines[0].upper().startswith(("NOTE", "STYLE", "REGION")):
             continue
-        timing_index = next(
-            (i for i, line in enumerate(lines) if _TIMING_LINE.match(line)),
-            None,
-        )
+        timing_index = None
+        timing_match = None
+        for line_index, line in enumerate(lines):
+            candidate = _TIMING_LINE.match(line)
+            if candidate is not None:
+                timing_index = line_index
+                timing_match = candidate
+                break
         if timing_index is None:
             continue
         cue_lines = lines[timing_index + 1:]
@@ -277,8 +315,56 @@ def _caption_text(text: str, transcript_format: TranscriptFormat) -> str:
             if line.strip()
         ).strip()
         if cue:
-            cues.append(cue)
-    return "\n\n".join(cues)
+            if timing_match is None:
+                raise RuntimeError("Caption timing match was not retained.")
+            cues.append(_CaptionCue(
+                start_ms=_timestamp_ms(timing_match.group(1)),
+                end_ms=_timestamp_ms(timing_match.group(2)),
+                text=cue,
+            ))
+    words: list[str] = []
+    removed_overlap_word_count = 0
+    previous: _CaptionCue | None = None
+    for cue in cues:
+        cue_words = cue.text.split()
+        overlap = 0
+        if previous is not None and cue.start_ms < previous.end_ms:
+            overlap = _exact_word_overlap(words, cue_words)
+            if (
+                    overlap < _MIN_PARTIAL_OVERLAP_WORDS
+                    and overlap != len(cue_words)
+            ):
+                overlap = 0
+        words.extend(cue_words[overlap:])
+        removed_overlap_word_count += overlap
+        previous = cue
+    return " ".join(words), len(cues), removed_overlap_word_count
+
+
+def _timestamp_ms(value: str) -> int:
+    fields = value.replace(",", ".").split(":")
+    if len(fields) == 2:
+        hours = 0
+        minutes, seconds = fields
+    elif len(fields) == 3:
+        hours, minutes, seconds = fields
+    else:
+        raise ValueError(f"Unsupported caption timestamp: {value!r}.")
+    whole_seconds, milliseconds = seconds.split(".")
+    return (
+        int(hours) * 3_600_000
+        + int(minutes) * 60_000
+        + int(whole_seconds) * 1_000
+        + int(milliseconds)
+    )
+
+
+def _exact_word_overlap(existing: list[str], incoming: list[str]) -> int:
+    maximum = min(len(existing), len(incoming))
+    for size in range(maximum, 0, -1):
+        if existing[-size:] == incoming[:size]:
+            return size
+    return 0
 
 
 def _result(

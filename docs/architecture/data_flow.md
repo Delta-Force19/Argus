@@ -750,6 +750,13 @@ version, and deterministic normalization creates a `TRANSCRIPT` derived
 artifact whose payload points back to both provenance records and their hash.
 The command never downloads a video or guesses caption authorship.
 
+Caption cue boundaries are transport structure, not paragraph or event
+boundaries. Normalization therefore produces continuous speech and collapses
+only exact word overlap carried by temporally overlapping cues, as used by
+rolling YouTube captions. The payload records the cue count and number of
+removed overlap words. The immutable raw artifact remains the authority for
+timing, layout, and independent reproduction of the transformation.
+
 The first provider adapter applies the same contract to YouTube caption
 tracks. `youtube-transcript-tracks` uses pinned `yt-dlp` metadata to list exact
 WebVTT track identifiers without downloading or persisting a track.
