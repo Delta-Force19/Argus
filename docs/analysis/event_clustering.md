@@ -30,3 +30,16 @@ Before implementation, the method must define:
 
 An event cluster will remain an evidence-backed reconstruction, not proof that
 all attached claims are true.
+
+## Implemented fragment boundary
+
+Argus can persist source-anchored event-fragment candidates for one immutable
+document version and one text-derived artifact. Each candidate records a
+half-open character span, a SHA-256 digest of the selected text, the method and
+method version, author, rationale, and explicit quality limitations. Reads
+recompute the digest against the source text and fail closed on disagreement.
+
+Candidates may overlap and alternative methods may produce different spans.
+They are not segmentation runs, do not assert complete document coverage, and
+carry no event or cluster assignment. Automated boundary detection and
+segmentation-run provenance remain planned.

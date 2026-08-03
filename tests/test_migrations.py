@@ -35,6 +35,7 @@ EXPECTED_TABLES = {
     "entity_candidate_assignments",
     "entity_candidates",
     "entity_mentions",
+    "event_fragment_candidates",
     "entity_resolution_evidence",
     "processing_states",
     "raw_artifacts",

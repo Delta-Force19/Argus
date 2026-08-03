@@ -457,6 +457,77 @@ class DerivedArtifact(Base):
     )
 
 
+class EventFragmentCandidate(Base):
+    """Source-anchored candidate span; never an event assignment."""
+
+    __tablename__ = "event_fragment_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "start_char >= 0",
+            name="ck_event_fragment_candidates_start_non_negative",
+        ),
+        CheckConstraint(
+            "end_char > start_char",
+            name="ck_event_fragment_candidates_end_after_start",
+        ),
+        CheckConstraint(
+            "length(text_hash) = 64",
+            name="ck_event_fragment_candidates_text_hash_sha256",
+        ),
+        UniqueConstraint(
+            "text_derived_artifact_id",
+            "start_char",
+            "end_char",
+            "method",
+            "method_version",
+            name="uq_event_fragment_candidate_origin",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_version_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "document_versions.id",
+            name=(
+                "fk_event_fragment_candidates_document_version_id_"
+                "document_versions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    text_derived_artifact_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "derived_artifacts.id",
+            name=(
+                "fk_event_fragment_candidates_text_artifact_id_"
+                "derived_artifacts"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
+    method: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+    method_version: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    quality_limitations: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, nullable=False
+    )
+
+
 class EntityMention(Base):
     __tablename__ = "entity_mentions"
     __table_args__ = (

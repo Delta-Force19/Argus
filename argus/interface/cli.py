@@ -106,6 +106,7 @@ from argus.services.document_pair_event_similarity_service import (
     EventSimilarityConfiguration,
     get_document_pair_event_similarity,
 )
+from argus.services.event_fragment_service import get_event_fragments
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import (
     resolve_software_provenance,
@@ -1495,6 +1496,45 @@ def compare_document_event_similarity(
         )
     for limitation in result.limitations:
         typer.echo(f"limitation={limitation!r}")
+
+
+@app.command()
+def event_fragments(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose candidate spans should be shown.",
+        ),
+) -> None:
+    """Show source-anchored candidates without assigning any event."""
+
+    try:
+        report = get_event_fragments(
+            document_version_id=document_version_id,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"event_fragments={report.event_fragment_count} "
+        f"event_assignments={report.event_assignment_count}"
+    )
+    for item in report.items:
+        typer.echo(
+            f"event_fragment_id={item.event_fragment_id} "
+            f"text_artifact_id={item.text_derived_artifact_id} "
+            f"span={item.start_char}:{item.end_char} "
+            f"text_hash={item.text_hash} method={item.method!r} "
+            f"method_version={item.method_version!r} "
+            f"created_by={item.created_by!r} "
+            f"rationale={item.rationale!r} event_assignment=none"
+        )
+        for limitation in item.quality_limitations:
+            typer.echo(
+                f"event_fragment_id={item.event_fragment_id} "
+                f"limitation={limitation!r}"
+            )
 
 
 @app.command()
