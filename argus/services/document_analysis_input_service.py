@@ -36,6 +36,9 @@ from argus.services.entity_candidate_provenance_service import (
 from argus.services.entity_registry_audit_service import (
     evaluate_entity_registry_validity,
 )
+from argus.services.transcript_provenance_service import (
+    transcript_provenance_issue,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +324,12 @@ def _load_unique_text_input(
         )
     provenance = provenances[0]
     artifact = provenance.text_artifact
+    transcript_issue = transcript_provenance_issue(session, artifact)
+    if transcript_issue is not None:
+        raise ValueError(
+            "Analysis input contains invalid transcript provenance: "
+            f"{transcript_issue}"
+        )
     recorded_character_count = artifact.payload.get("character_count")
     if recorded_character_count is not None and (
         not isinstance(recorded_character_count, int)

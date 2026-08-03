@@ -42,6 +42,7 @@ EXPECTED_TABLES = {
     "retrieval_attempts",
     "sources",
     "telegram_subscribers",
+    "transcript_acquisitions",
 }
 
 class MigrationServiceTests(unittest.TestCase):
@@ -89,6 +90,26 @@ class MigrationIntegrationTests(unittest.TestCase):
                 test_engine.dispose()
 
         self.assertEqual(table_names, EXPECTED_TABLES)
+
+    def test_transcript_migration_downgrades_to_event_fragments(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "transcript_test.db"
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "head")
+                command.downgrade(config, "b5c6d7e8f9a0")
+            test_engine = create_engine(database_url)
+            try:
+                table_names = set(inspect(test_engine).get_table_names())
+            finally:
+                test_engine.dispose()
+
+        self.assertNotIn("transcript_acquisitions", table_names)
+        self.assertIn("event_fragment_candidates", table_names)
 
     def test_source_migration_backfills_legacy_articles(
         self,

@@ -9,6 +9,7 @@ from argus.database import SessionLocal
 from argus.models import DerivedArtifact, Document, DocumentVersion
 from argus.services.event_text_readiness_service import (
     EventTextReadiness,
+    EventTextReadinessStatus,
     assess_event_text_readiness,
 )
 from argus.services.event_fragment_service import (
@@ -17,6 +18,9 @@ from argus.services.event_fragment_service import (
 )
 from argus.storage.derived_artifact_repository import (
     DerivedArtifactRepository,
+)
+from argus.services.transcript_provenance_service import (
+    transcript_provenance_issue,
 )
 
 
@@ -104,7 +108,7 @@ def inspect_document_text(
             character_count=len(text),
             text_hash=_hash(text),
             blocks=blocks,
-            event_text_readiness=_readiness(document, artifact, text),
+            event_text_readiness=_readiness(session, document, artifact, text),
         )
 
 
@@ -123,7 +127,7 @@ def segment_event_fragments(
             document_version_id=document_version_id,
             text_derived_artifact_id=text_derived_artifact_id,
         )
-        readiness = _readiness(document, artifact, text)
+        readiness = _readiness(session, document, artifact, text)
         if persist and not readiness.ready_for_event_analysis:
             raise ValueError(
                 "Event fragment persistence is blocked: "
@@ -245,15 +249,25 @@ def _select_text_source(
 
 
 def _readiness(
+        session: Session,
         document: Document,
         artifact: DerivedArtifact,
         text: str,
 ) -> EventTextReadiness:
-    return assess_event_text_readiness(
+    readiness = assess_event_text_readiness(
         identifier_scheme=document.identifier_scheme,
         identifier_value=document.identifier_value,
         artifact_type=artifact.artifact_type,
         text=text,
+    )
+    issue = transcript_provenance_issue(session, artifact)
+    if issue is None:
+        return readiness
+    return EventTextReadiness(
+        status=EventTextReadinessStatus.BLOCKED,
+        ready_for_event_analysis=False,
+        reasons=readiness.reasons + (issue,),
+        limitations=readiness.limitations,
     )
 
 

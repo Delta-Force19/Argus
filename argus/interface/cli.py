@@ -111,6 +111,8 @@ from argus.services.event_fragment_segmentation_service import (
     inspect_document_text,
     segment_event_fragments,
 )
+from argus.services.transcript_ingestion_service import ingest_transcript_file
+from argus.transcripts import TranscriptFormat, TranscriptKind
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import (
     resolve_software_provenance,
@@ -1539,6 +1541,103 @@ def event_fragments(
                 f"event_fragment_id={item.event_fragment_id} "
                 f"limitation={limitation!r}"
             )
+
+
+@app.command("ingest-transcript")
+def ingest_transcript_command(
+        document_version_id: int = typer.Option(
+            ..., "--document-version-id", min=1,
+            help="Video document version to which the transcript belongs.",
+        ),
+        transcript_file: Path = typer.Option(
+            ..., "--transcript-file", exists=True, dir_okay=False,
+            readable=True, help="Exact UTF-8 provider output to preserve.",
+        ),
+        provider: str = typer.Option(
+            ..., "--provider", help="Transcript provider or acquisition tool.",
+        ),
+        provider_version: str = typer.Option(
+            ..., "--provider-version", help="Exact provider/tool version.",
+        ),
+        requested_location: str = typer.Option(
+            ..., "--requested-location",
+            help="Video, caption-track, API, or archive location requested.",
+        ),
+        retrieved_at: str = typer.Option(
+            ..., "--retrieved-at", help="RFC 3339 retrieval time with timezone.",
+        ),
+        language: str = typer.Option(
+            ..., "--language", help="BCP 47 transcript language tag.",
+        ),
+        transcript_kind: TranscriptKind = typer.Option(
+            TranscriptKind.UNKNOWN,
+            "--transcript-kind",
+            case_sensitive=False,
+            help="Upstream authorship class of the transcript.",
+        ),
+        transcript_format: TranscriptFormat = typer.Option(
+            TranscriptFormat.PLAIN_TEXT,
+            "--transcript-format",
+            case_sensitive=False,
+            help="Serialization of the imported transcript bytes.",
+        ),
+        media_type: str = typer.Option(
+            "text/plain; charset=utf-8",
+            "--media-type",
+            help="Media type of the exact imported bytes.",
+        ),
+        resolved_location: str | None = typer.Option(
+            None, "--resolved-location",
+            help="Final location after redirects or provider resolution.",
+        ),
+        external_identifier: str | None = typer.Option(
+            None, "--external-identifier",
+            help="Provider track or media identifier, when known.",
+        ),
+) -> None:
+    """Preserve transcript bytes and create a normalized text artifact."""
+
+    try:
+        normalized_retrieved_at = datetime.fromisoformat(
+            retrieved_at.replace("Z", "+00:00")
+        )
+        if (
+                normalized_retrieved_at.tzinfo is None
+                or normalized_retrieved_at.utcoffset() is None
+        ):
+            raise ValueError("retrieved_at must include a timezone.")
+        result = ingest_transcript_file(
+            document_version_id=document_version_id,
+            transcript_file=transcript_file,
+            provider=provider,
+            provider_version=provider_version,
+            requested_location=requested_location,
+            resolved_location=resolved_location,
+            external_identifier=external_identifier,
+            retrieved_at=normalized_retrieved_at,
+            language=language,
+            transcript_kind=transcript_kind,
+            transcript_format=transcript_format,
+            media_type=media_type,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"document_version_id={result.document_version_id} "
+        f"transcript_acquisition_id={result.transcript_acquisition_id} "
+        f"raw_artifact_id={result.raw_artifact_id} "
+        f"transcript_artifact_id={result.transcript_artifact_id} "
+        f"character_count={result.character_count} "
+        f"language={result.language!r} "
+        f"transcript_kind={result.transcript_kind.value!r} "
+        f"transcript_format={result.transcript_format.value!r}"
+    )
+    typer.echo(
+        f"raw_content_hash={result.raw_content_hash} "
+        f"text_content_hash={result.text_content_hash}"
+    )
+    for limitation in result.quality_limitations:
+        typer.echo(f"transcript_limitation={limitation!r}")
 
 
 @app.command("inspect-document-text")

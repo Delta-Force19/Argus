@@ -37,6 +37,7 @@ from argus.processing import (
 
 from argus.sources import SourceType
 from argus.telegram_subscriptions import TelegramSubscriberStatus
+from argus.transcripts import TranscriptFormat, TranscriptKind
 
 
 def utc_now() -> datetime:
@@ -451,6 +452,104 @@ class DerivedArtifact(Base):
     )
     quality_limitations: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, nullable=False
+    )
+
+
+class TranscriptAcquisition(Base):
+    """One attributable retrieval/import of immutable transcript bytes."""
+
+    __tablename__ = "transcript_acquisitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_version_id",
+            "raw_artifact_id",
+            "provider",
+            "provider_version",
+            "requested_location",
+            "retrieved_at",
+            "language",
+            "transcript_kind",
+            "transcript_format",
+            name="uq_transcript_acquisition_provenance",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_version_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "document_versions.id",
+            name=(
+                "fk_transcript_acquisitions_document_version_id_"
+                "document_versions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    raw_artifact_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "raw_artifacts.id",
+            name=(
+                "fk_transcript_acquisitions_raw_artifact_id_raw_artifacts"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )
+    provider_version: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
+    requested_location: Mapped[str] = mapped_column(
+        String(2048), nullable=False
+    )
+    resolved_location: Mapped[str | None] = mapped_column(
+        String(2048), nullable=True
+    )
+    external_identifier: Mapped[str | None] = mapped_column(
+        String(2048), nullable=True, index=True
+    )
+    retrieved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    language: Mapped[str] = mapped_column(
+        String(35), nullable=False, index=True
+    )
+    transcript_kind: Mapped[TranscriptKind] = mapped_column(
+        SQLAlchemyEnum(
+            TranscriptKind,
+            name="transcript_kind",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    transcript_format: Mapped[TranscriptFormat] = mapped_column(
+        SQLAlchemyEnum(
+            TranscriptFormat,
+            name="transcript_format",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    media_type: Mapped[str] = mapped_column(
+        String(255), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, nullable=False

@@ -741,6 +741,17 @@ event comparison and fragment persistence until a source-anchored transcript
 exists. This prevents a teaser or generic description from being represented
 as the content of the audiovisual report.
 
+`ingest-transcript` is the first transcript intake boundary. It accepts exact
+UTF-8 provider output in plain text, WebVTT or SubRip form together with
+explicit provider, retrieval, language, track and authorship metadata. The
+original bytes enter the content-addressed raw-artifact store. A
+`TranscriptAcquisition` anchors those bytes to the exact video document
+version, and deterministic normalization creates a `TRANSCRIPT` derived
+artifact whose payload points back to both provenance records and their hash.
+The command never downloads a video or guesses caption authorship. A future
+YouTube or publisher connector must produce this same general intake contract
+instead of writing analytical text directly.
+
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
 transaction. The row records the exact

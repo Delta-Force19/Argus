@@ -15,6 +15,7 @@ Argus is under active development. The current codebase includes:
 
 - RSS collection and normalized source/endpoint storage;
 - immutable retrieval, raw-artifact, document, and document-version records;
+- provenance-anchored transcript intake for plain text, WebVTT, and SubRip;
 - main-text extraction and legacy English discourse analysis;
 - versioned entity mentions, candidate generation, alias proposals, and
   reviewed entity resolution;
@@ -81,6 +82,7 @@ python main.py analyze --limit 20
 python main.py latest-news --limit 10
 python main.py ready-document-versions --limit 10
 python main.py compare-document-event-similarity --help
+python main.py ingest-transcript --help
 python main.py inspect-document-text --document-version-id 34
 python main.py segment-event-fragments --document-version-id 34
 ```

@@ -141,6 +141,27 @@ original document and record the translation method, model, version, and
 creation time. Analytical evidence should reference the original-language
 content whenever possible.
 
+### Transcript Acquisition
+
+A video page and its spoken content are distinct information layers. A
+`TranscriptAcquisition` records one exact provider result associated with a
+specific `DocumentVersion`. It references content-addressed raw bytes and
+stores the provider and version, requested and resolved locations, retrieval
+time, language, upstream transcript kind, serialization format, media type and
+external track identifier when available.
+
+The normalized `TRANSCRIPT` derived artifact records the acquisition and raw
+artifact identifiers and digest in its payload. WebVTT and SubRip timestamps
+remain recoverable from the immutable raw artifact even though the normalized
+analytical text omits them. Publisher captions, human-created captions and
+automatically generated captions remain distinguishable; Argus does not treat
+their reliability as equal or silently relabel one kind as another.
+
+Importing provider output does not prove that the transcript is complete or
+accurate and does not create an event. A transcript can make video content
+eligible for later structural inspection while retaining its explicit quality
+limitations.
+
 ---
 
 ### Observation

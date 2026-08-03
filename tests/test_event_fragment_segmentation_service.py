@@ -1,4 +1,7 @@
 import hashlib
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from sqlalchemy import create_engine, select
@@ -15,11 +18,16 @@ from argus.services.event_fragment_segmentation_service import (
 from argus.storage.derived_artifact_repository import (
     DerivedArtifactRepository,
 )
+from argus.services.transcript_ingestion_service import (
+    TranscriptIngestionService,
+)
+from argus.storage.artifact_store import FileSystemRawArtifactStore
 from argus.storage.document_repository import (
     DocumentRepository,
     DocumentVersionRepository,
 )
 from argus.storage.raw_artifact_repository import RawArtifactRepository
+from argus.transcripts import TranscriptFormat, TranscriptKind
 
 
 class EventFragmentSegmentationServiceTests(unittest.TestCase):
@@ -27,6 +35,7 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.session = Session(self.engine)
+        self.temporary_directory = TemporaryDirectory()
         self.version = self._version("bulletin")
         self.text = (
             "Evening bulletin\n\n"
@@ -41,6 +50,7 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.session.close()
         self.engine.dispose()
+        self.temporary_directory.cleanup()
 
     def test_inspection_exposes_exact_blocks_and_offsets(self) -> None:
         report = inspect_document_text(
@@ -167,10 +177,22 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
 
     def test_video_transcript_can_be_persisted(self) -> None:
         version = self._version("video/bulletin-transcript")
-        self._artifact(
-            version,
-            "First reported event in the bulletin.",
-            artifact_type=DerivedArtifactType.TRANSCRIPT,
+        TranscriptIngestionService(
+            self.session,
+            artifact_store=FileSystemRawArtifactStore(
+                Path(self.temporary_directory.name)
+            ),
+        ).ingest(
+            document_version_id=version.id,
+            content=b"First reported event in the bulletin.",
+            provider="test-provider",
+            provider_version="1",
+            requested_location="https://example.test/video/source",
+            retrieved_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            language="en",
+            transcript_kind=TranscriptKind.HUMAN_CREATED,
+            transcript_format=TranscriptFormat.PLAIN_TEXT,
+            media_type="text/plain; charset=utf-8",
         )
         self.session.commit()
 
@@ -183,6 +205,26 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
         self.assertTrue(report.persisted)
         self.assertTrue(
             report.event_text_readiness.ready_for_event_analysis
+        )
+
+    def test_unanchored_transcript_is_blocked(self) -> None:
+        version = self._version("video/unanchored-transcript")
+        self._artifact(
+            version,
+            "A transcript-shaped payload without acquisition provenance.",
+            artifact_type=DerivedArtifactType.TRANSCRIPT,
+        )
+        self.session.commit()
+
+        report = segment_event_fragments(
+            document_version_id=version.id,
+            session_factory=self._session,
+        )
+
+        self.assertFalse(report.event_text_readiness.ready_for_event_analysis)
+        self.assertIn(
+            "no structured source provenance",
+            report.event_text_readiness.reasons[0],
         )
 
     def test_requires_explicit_artifact_when_multiple_are_available(self) -> None:
