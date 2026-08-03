@@ -727,6 +727,14 @@ become the source of truth. Missing evidence is represented as unavailable,
 not as negative evidence, while incomplete or unsafe entity resolution still
 fails closed when either analysis bundle is built.
 
+Before event reconstruction, `inspect-document-text` exposes exact paragraph
+blocks and offsets from one immutable text artifact. The read-only default of
+`segment-event-fragments` proposes structural spans from blank-line and
+heading-like boundaries. Persistence requires `--persist` and creates only
+source-anchored candidates through the existing idempotent fragment service;
+it never creates an event or assignment. Ambiguous text artifacts and damaged
+text payloads fail closed.
+
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned
 transaction. The row records the exact

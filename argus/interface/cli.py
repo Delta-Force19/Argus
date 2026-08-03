@@ -107,6 +107,10 @@ from argus.services.document_pair_event_similarity_service import (
     get_document_pair_event_similarity,
 )
 from argus.services.event_fragment_service import get_event_fragments
+from argus.services.event_fragment_segmentation_service import (
+    inspect_document_text,
+    segment_event_fragments,
+)
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import (
     resolve_software_provenance,
@@ -1535,6 +1539,110 @@ def event_fragments(
                 f"event_fragment_id={item.event_fragment_id} "
                 f"limitation={limitation!r}"
             )
+
+
+@app.command("inspect-document-text")
+def inspect_document_text_blocks(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose text structure should be shown.",
+        ),
+        text_artifact_id: int | None = typer.Option(
+            None,
+            "--text-artifact-id",
+            min=1,
+            help="Exact text artifact when the version has more than one.",
+        ),
+        max_block_chars: int = typer.Option(
+            400,
+            "--max-block-chars",
+            min=40,
+            max=5000,
+            help="Maximum characters printed for each block preview.",
+        ),
+) -> None:
+    """Show reproducible paragraph blocks and exact character offsets."""
+
+    try:
+        report = inspect_document_text(
+            document_version_id=document_version_id,
+            text_derived_artifact_id=text_artifact_id,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"text_artifact_id={report.text_derived_artifact_id} "
+        f"character_count={report.character_count} "
+        f"text_hash={report.text_hash} blocks={len(report.blocks)}"
+    )
+    for block in report.blocks:
+        preview = block.text
+        truncated = len(preview) > max_block_chars
+        if truncated:
+            preview = preview[:max_block_chars]
+        typer.echo(
+            f"block={block.block_index} "
+            f"span={block.start_char}:{block.end_char} "
+            f"heading_candidate={str(block.heading_candidate).lower()} "
+            f"text_hash={block.text_hash} truncated={str(truncated).lower()} "
+            f"text={json.dumps(preview, ensure_ascii=False)}"
+        )
+
+
+@app.command("segment-event-fragments")
+def segment_event_fragments_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version to segment structurally.",
+        ),
+        text_artifact_id: int | None = typer.Option(
+            None,
+            "--text-artifact-id",
+            min=1,
+            help="Exact text artifact when the version has more than one.",
+        ),
+        persist: bool = typer.Option(
+            False,
+            "--persist",
+            help="Persist the proposals as candidates; never assign events.",
+        ),
+) -> None:
+    """Preview or persist deterministic structural fragment candidates."""
+
+    try:
+        report = segment_event_fragments(
+            document_version_id=document_version_id,
+            text_derived_artifact_id=text_artifact_id,
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"text_artifact_id={report.text_derived_artifact_id} "
+        f"fragments={report.fragment_count} "
+        f"persisted={str(report.persisted).lower()} "
+        f"method={report.method!r} "
+        f"method_version={report.method_version!r} "
+        f"boundary_basis={report.boundary_basis!r} "
+        "event_assignments=0"
+    )
+    for index, item in enumerate(report.items, start=1):
+        typer.echo(
+            f"fragment={index} "
+            "event_fragment_id="
+            f"{item.event_fragment_id if item.event_fragment_id is not None else 'none'} "
+            f"span={item.start_char}:{item.end_char} "
+            f"text_hash={item.text_hash} "
+            f"rationale={item.rationale!r} event_assignment=none"
+        )
+        for limitation in item.quality_limitations:
+            typer.echo(f"fragment={index} limitation={limitation!r}")
 
 
 @app.command()
