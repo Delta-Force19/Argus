@@ -112,6 +112,10 @@ from argus.services.event_fragment_segmentation_service import (
     segment_event_fragments,
 )
 from argus.services.transcript_ingestion_service import ingest_transcript_file
+from argus.services.youtube_transcript_ingestion_service import (
+    ingest_youtube_transcript,
+)
+from argus.transcript_sources.youtube import YouTubeTranscriptSource
 from argus.transcripts import TranscriptFormat, TranscriptKind
 from argus.services.analysis_run_service import prepare_analysis_run
 from argus.services.software_provenance_service import (
@@ -1541,6 +1545,96 @@ def event_fragments(
                 f"event_fragment_id={item.event_fragment_id} "
                 f"limitation={limitation!r}"
             )
+
+
+@app.command("youtube-transcript-tracks")
+def youtube_transcript_tracks_command(
+        youtube_url: str = typer.Option(
+            ...,
+            "--youtube-url",
+            help="Exact youtube.com or youtu.be video URL to inspect.",
+        ),
+) -> None:
+    """List exact WebVTT tracks without retrieving or persisting one."""
+
+    try:
+        catalog = YouTubeTranscriptSource().catalog(youtube_url)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"youtube_video_id={catalog.video_id!r} "
+        f"provider={catalog.provider!r} "
+        f"provider_version={catalog.provider_version!r} "
+        f"tracks={len(catalog.tracks)} title={catalog.title!r}"
+    )
+    for track in catalog.tracks:
+        typer.echo(
+            f"track_id={track.track_id!r} name={track.name!r} "
+            f"transcript_kind={track.transcript_kind.value!r} "
+            f"transcript_format={track.transcript_format.value!r}"
+        )
+
+
+@app.command("ingest-youtube-transcript")
+def ingest_youtube_transcript_command(
+        document_version_id: int = typer.Option(
+            ..., "--document-version-id", min=1,
+            help="Video document version to which the transcript belongs.",
+        ),
+        youtube_url: str = typer.Option(
+            ...,
+            "--youtube-url",
+            help="Exact youtube.com or youtu.be video URL.",
+        ),
+        track_id: str = typer.Option(
+            ...,
+            "--track-id",
+            help="Exact track id shown by youtube-transcript-tracks.",
+        ),
+        allow_auto_generated: bool = typer.Option(
+            False,
+            "--allow-auto-generated",
+            help="Explicitly permit an automatically generated caption track.",
+        ),
+        allow_cross_location: bool = typer.Option(
+            False,
+            "--allow-cross-location",
+            help=(
+                "Attach a YouTube mirror to a non-matching document URI and "
+                "record that equivalence remains operator-asserted."
+            ),
+        ),
+) -> None:
+    """Retrieve one exact YouTube caption track and preserve its provenance."""
+
+    try:
+        result = ingest_youtube_transcript(
+            document_version_id=document_version_id,
+            youtube_url=youtube_url,
+            track_id=track_id,
+            allow_auto_generated=allow_auto_generated,
+            allow_cross_location=allow_cross_location,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    ingestion = result.ingestion
+    typer.echo(
+        f"document_version_id={ingestion.document_version_id} "
+        f"youtube_video_id={result.video_id!r} track_id={result.track_id!r} "
+        f"cross_location={str(result.cross_location).lower()} "
+        f"transcript_acquisition_id={ingestion.transcript_acquisition_id} "
+        f"raw_artifact_id={ingestion.raw_artifact_id} "
+        f"transcript_artifact_id={ingestion.transcript_artifact_id} "
+        f"character_count={ingestion.character_count} "
+        f"language={ingestion.language!r} "
+        f"transcript_kind={ingestion.transcript_kind.value!r}"
+    )
+    typer.echo(
+        f"raw_content_hash={ingestion.raw_content_hash} "
+        f"text_content_hash={ingestion.text_content_hash}"
+    )
+    for limitation in ingestion.quality_limitations:
+        typer.echo(f"transcript_limitation={limitation!r}")
 
 
 @app.command("ingest-transcript")

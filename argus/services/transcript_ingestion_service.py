@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
@@ -82,6 +82,7 @@ class TranscriptIngestionService:
             media_type: str,
             resolved_location: str | None = None,
             external_identifier: str | None = None,
+            additional_quality_limitations: Sequence[str] = (),
     ) -> TranscriptIngestionResult:
         version = self._session.get(DocumentVersion, document_version_id)
         if version is None:
@@ -103,7 +104,12 @@ class TranscriptIngestionService:
         }.items():
             if not value.strip():
                 raise ValueError(f"{name} must not be blank.")
-        text, limitations = _normalize_transcript(content, transcript_format)
+        text, normalization_limitations = _normalize_transcript(
+            content, transcript_format
+        )
+        limitations = tuple(dict.fromkeys(
+            (*normalization_limitations, *additional_quality_limitations)
+        ))
         stored = self._artifact_store.store(content)
         raw_artifact = self._raw_repository.get_or_create(stored)
         acquisition = self._acquisition_repository.register(
@@ -169,6 +175,7 @@ def ingest_transcript_file(
         media_type: str,
         resolved_location: str | None = None,
         external_identifier: str | None = None,
+        additional_quality_limitations: Sequence[str] = (),
         session_factory: Callable[[], Session] = SessionLocal,
         artifact_store: RawArtifactStore | None = None,
 ) -> TranscriptIngestionResult:
@@ -198,6 +205,7 @@ def ingest_transcript_file(
                 transcript_kind=transcript_kind,
                 transcript_format=transcript_format,
                 media_type=media_type,
+                additional_quality_limitations=additional_quality_limitations,
             )
             session.commit()
             return result

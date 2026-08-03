@@ -748,9 +748,25 @@ original bytes enter the content-addressed raw-artifact store. A
 `TranscriptAcquisition` anchors those bytes to the exact video document
 version, and deterministic normalization creates a `TRANSCRIPT` derived
 artifact whose payload points back to both provenance records and their hash.
-The command never downloads a video or guesses caption authorship. A future
-YouTube or publisher connector must produce this same general intake contract
-instead of writing analytical text directly.
+The command never downloads a video or guesses caption authorship.
+
+The first provider adapter applies the same contract to YouTube caption
+tracks. `youtube-transcript-tracks` uses pinned `yt-dlp` metadata to list exact
+WebVTT track identifiers without downloading or persisting a track.
+`ingest-youtube-transcript` requires one exact identifier, prefers a
+publisher-provided track when the same identifier also has an automatic
+variant, and refuses automatic captions without explicit authorization. It
+retrieves only the selected caption response, applies a byte limit while
+streaming, and passes the unchanged bytes, final response location, provider
+version, video/track identifier and retrieval time into the general transcript
+intake service. It never downloads the audiovisual media.
+
+For a YouTube-native document, the adapter verifies that the document URI and
+provider metadata resolve to the same video identifier. Attaching an external
+YouTube publication to a document with another URI requires explicit
+cross-location authorization. That path records a quality limitation saying
+the equivalence is operator-asserted rather than silently promoting the mirror
+relationship to fact.
 
 `argus prepare-analysis` is the first persisted analytical boundary. It builds
 the complete bundle and inserts its `AnalysisRun` in the same caller-owned

@@ -162,6 +162,13 @@ accurate and does not create an event. A transcript can make video content
 eligible for later structural inspection while retaining its explicit quality
 limitations.
 
+Provider adapters may retrieve the raw transcript bytes, but they do not bypass
+this model. The YouTube adapter records the exact video and caption-track
+identifier and prefers publisher-provided captions over automatically generated
+ones. If the YouTube URL differs from the document's stable URI, Argus requires
+an explicit operator assertion and carries the unverified equivalence forward
+as a transcript quality limitation.
+
 ---
 
 ### Observation
