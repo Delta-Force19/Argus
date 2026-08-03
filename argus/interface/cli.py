@@ -19,6 +19,7 @@ from argus.analysis.corpus_builder import (
 )
 from argus.analysis.corpus_intake import (
     assemble_source_manifest,
+    inspect_source_intake,
     register_human_source,
     register_synthetic_source,
 )
@@ -1790,6 +1791,61 @@ def assemble_synthetic_corpus_manifest(
         + " splits=" + json.dumps(result["splits"], sort_keys=True)
     )
     typer.echo(f"output={str(output_jsonl)!r}")
+
+
+@app.command()
+def inspect_synthetic_corpus_intake(
+        workspace_root: Path = typer.Option(
+            ..., "--workspace-root", exists=True, file_okay=False, readable=True,
+            help="Corpus intake root containing registered source records.",
+        ),
+        split_salt: str = typer.Option(
+            ..., "--split-salt",
+            help="Dataset/version salt used to preview group split assignment.",
+        ),
+        train_ratio: float = typer.Option(0.6, "--train-ratio", min=0.01, max=0.98),
+        calibration_ratio: float = typer.Option(
+            0.2, "--calibration-ratio", min=0.01, max=0.98,
+        ),
+) -> None:
+    """Verify registered artifacts and preview corpus build readiness."""
+
+    try:
+        result = inspect_source_intake(
+            workspace_root=workspace_root,
+            split_salt=split_salt,
+            train_ratio=train_ratio,
+            calibration_ratio=calibration_ratio,
+        )
+    except (ValueError, OSError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"records={result.records} groups={result.groups} "
+        f"ready_for_build={str(result.ready_for_build).lower()}"
+    )
+    typer.echo(
+        "labels=" + json.dumps(result.labels, sort_keys=True)
+        + " splits=" + json.dumps(result.splits, sort_keys=True)
+    )
+    typer.echo(
+        "split_labels=" + json.dumps(result.split_labels, sort_keys=True)
+    )
+    for source in result.sources:
+        typer.echo(
+            f"source={source['source_id']!r} label={source['label']} "
+            f"split={source['split']} group={source['source_group_id']!r} "
+            f"eligible={str(source['eligible_for_scoring']).lower()} "
+            f"words={source['word_count']} sentences={source['sentence_count']}"
+        )
+    if result.missing_split_labels:
+        typer.echo("missing=" + ",".join(result.missing_split_labels))
+    if result.ineligible_sources:
+        typer.echo("ineligible=" + ",".join(result.ineligible_sources))
+    if result.unsupported_language_sources:
+        typer.echo(
+            "unsupported_language="
+            + ",".join(result.unsupported_language_sources)
+        )
 
 
 @app.command()

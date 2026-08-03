@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from hashlib import sha256
@@ -16,6 +17,7 @@ from argus.analysis.corpus_builder import (
     SOURCE_RECORD_SCHEMA,
     build_corpus_from_manifest,
 )
+from argus.analysis.synthetic_origin import StructuralSyntheticTextAnalyzer
 
 
 GENERATION_LOG_SCHEMA = "synthetic-origin-generation-log@1"
@@ -43,6 +45,20 @@ class IntakeRegistration:
     content_sha256: str
     prompt_path: Path | None = None
     generation_log_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IntakeInspection:
+    records: int
+    groups: int
+    labels: dict[str, int]
+    splits: dict[str, int]
+    split_labels: dict[str, dict[str, int]]
+    sources: tuple[dict[str, object], ...]
+    missing_split_labels: tuple[str, ...]
+    ineligible_sources: tuple[str, ...]
+    unsupported_language_sources: tuple[str, ...]
+    ready_for_build: bool
 
 
 def register_human_source(
@@ -229,28 +245,7 @@ def assemble_source_manifest(
 
     if output_jsonl.exists():
         raise FileExistsError(f"Output already exists: {output_jsonl}")
-    records_root = workspace_root / "records"
-    if not records_root.is_dir():
-        raise ValueError("Intake workspace contains no records directory.")
-    paths = sorted(records_root.glob("*.json"))
-    if not paths:
-        raise ValueError("Intake workspace contains no source records.")
-    records: list[dict[str, object]] = []
-    for path in paths:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"Invalid source record: {path.name}.") from error
-        if not isinstance(value, dict):
-            raise ValueError(f"Source record {path.name} must be a JSON object.")
-        if value.get("source_id") != path.stem:
-            raise ValueError(f"Source record {path.name} does not match its filename.")
-        _verify_intake_record(value, workspace_root=workspace_root)
-        records.append(value)
-    ids = [str(value.get("source_id", "")) for value in records]
-    if len(ids) != len(set(ids)):
-        raise ValueError("Intake workspace contains duplicate source_id values.")
-    records.sort(key=lambda value: str(value.get("source_id", "")))
+    records = _load_intake_records(workspace_root)
     manifest_bytes = b"".join(_json_line_bytes(record) for record in records)
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
     temporary = _stage_file(output_jsonl, manifest_bytes)
@@ -275,6 +270,110 @@ def assemble_source_manifest(
         "splits": build.receipt["splits"],
         "manifest_hash": build.receipt["manifest_hash"],
     }
+
+
+def inspect_source_intake(
+        *,
+        workspace_root: Path,
+        split_salt: str,
+        train_ratio: float = 0.6,
+        calibration_ratio: float = 0.2,
+) -> IntakeInspection:
+    """Verify intake artifacts and report build readiness without publishing."""
+
+    records = _load_intake_records(workspace_root)
+    manifest_bytes = b"".join(_json_line_bytes(record) for record in records)
+    with tempfile.TemporaryDirectory(prefix="argus-corpus-inspection-") as directory:
+        manifest_path = Path(directory) / "manifest.jsonl"
+        manifest_path.write_bytes(manifest_bytes)
+        build = build_corpus_from_manifest(
+            manifest_path,
+            source_root=workspace_root / "text",
+            split_salt=split_salt,
+            train_ratio=train_ratio,
+            calibration_ratio=calibration_ratio,
+        )
+
+    split_names = ("train", "calibration", "test")
+    label_names = ("human", "synthetic")
+    split_labels = {
+        split: {label: 0 for label in label_names} for split in split_names
+    }
+    analyzer = StructuralSyntheticTextAnalyzer()
+    sources: list[dict[str, object]] = []
+    ineligible: list[str] = []
+    unsupported_languages: list[str] = []
+    for sample in build.samples:
+        source_id = str(sample["sample_id"])
+        label = str(sample["label"])
+        split = str(sample["split"])
+        language = str(sample["language"])
+        assessment = analyzer.analyze(str(sample["text"]))
+        split_labels[split][label] += 1
+        if not assessment.eligible_for_scoring:
+            ineligible.append(source_id)
+        if not (language == "en" or language.startswith("en-")):
+            unsupported_languages.append(source_id)
+        sources.append({
+            "source_id": source_id,
+            "label": label,
+            "split": split,
+            "source_group_id": str(sample["source_group_id"]),
+            "language": language,
+            "genre": str(sample["genre"]),
+            "eligible_for_scoring": assessment.eligible_for_scoring,
+            "word_count": assessment.word_count,
+            "sentence_count": assessment.sentence_count,
+        })
+    missing = tuple(
+        f"{split}:{label}"
+        for split in split_names
+        for label in label_names
+        if split_labels[split][label] == 0
+    )
+    groups = {str(sample["source_group_id"]) for sample in build.samples}
+    return IntakeInspection(
+        records=len(build.samples),
+        groups=len(groups),
+        labels=dict(sorted(Counter(
+            str(sample["label"]) for sample in build.samples
+        ).items())),
+        splits=dict(sorted(Counter(
+            str(sample["split"]) for sample in build.samples
+        ).items())),
+        split_labels=split_labels,
+        sources=tuple(sources),
+        missing_split_labels=missing,
+        ineligible_sources=tuple(sorted(ineligible)),
+        unsupported_language_sources=tuple(sorted(unsupported_languages)),
+        ready_for_build=not missing and not ineligible and not unsupported_languages,
+    )
+
+
+def _load_intake_records(workspace_root: Path) -> list[dict[str, object]]:
+    records_root = workspace_root / "records"
+    if not records_root.is_dir():
+        raise ValueError("Intake workspace contains no records directory.")
+    paths = sorted(records_root.glob("*.json"))
+    if not paths:
+        raise ValueError("Intake workspace contains no source records.")
+    records: list[dict[str, object]] = []
+    for path in paths:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"Invalid source record: {path.name}.") from error
+        if not isinstance(value, dict):
+            raise ValueError(f"Source record {path.name} must be a JSON object.")
+        if value.get("source_id") != path.stem:
+            raise ValueError(f"Source record {path.name} does not match its filename.")
+        _verify_intake_record(value, workspace_root=workspace_root)
+        records.append(value)
+    ids = [str(value.get("source_id", "")) for value in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Intake workspace contains duplicate source_id values.")
+    records.sort(key=lambda value: str(value.get("source_id", "")))
+    return records
 
 
 def _verify_intake_record(

@@ -22,6 +22,11 @@ Every registration is create-only. Reusing a `source_id` fails without
 replacing preserved files. Identifiers are restricted to lowercase ASCII
 letters, digits, `.`, `_` and `-` and cannot express filesystem traversal.
 
+The entire `data/calibration/` tree is excluded from Git. It may contain
+copyrighted publisher text, private generation prompts and large immutable
+build artifacts. Back it up as a controlled dataset separately; do not publish
+it with the application source code.
+
 ## Register a human source
 
 The operator must have affirmative human-authorship evidence and a durable
@@ -116,6 +121,27 @@ This creates text, prompt, a self-hashed
 transactional registration. Non-finite JSON values are rejected. Put prompt
 variants or generations derived from one underlying source in the same
 `source_group_id` so related observations remain in one split.
+
+## Inspect intake readiness
+
+Before assembly, inspect the workspace without writing a manifest:
+
+```powershell
+& ".\.venv\Scripts\python.exe" main.py inspect-synthetic-corpus-intake `
+    --workspace-root $intake `
+    --split-salt "synthetic-origin-en-v1"
+```
+
+The command re-verifies every text hash and all synthetic prompt/log links,
+previews the immutable group-to-split assignment, counts each
+`human/synthetic × train/calibration/test` cell and checks the 250-word,
+10-sentence scoring minimum. `ready_for_build=true` means the current intake
+satisfies the mechanical corpus contract; it does not mean that the dataset is
+large, representative or statistically adequate.
+
+For the first National Geographic source, the stable group assignment under
+`synthetic-origin-en-v1` is `train`. The inspection therefore initially reports
+five empty label/split cells, beginning with `train:synthetic`.
 
 ## Assemble the manifest
 

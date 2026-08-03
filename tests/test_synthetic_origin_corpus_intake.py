@@ -7,6 +7,7 @@ import unittest
 from argus.analysis.corpus_intake import (
     GENERATION_LOG_SCHEMA,
     assemble_source_manifest,
+    inspect_source_intake,
     register_human_source,
     register_synthetic_source,
 )
@@ -258,6 +259,103 @@ class SyntheticOriginCorpusIntakeTests(unittest.TestCase):
             )
 
         self.assertFalse((self.root / "manifest.jsonl").exists())
+
+    def test_inspection_reports_single_human_source_and_missing_slots(self) -> None:
+        source = self._input("human.txt", _long_text("human"))
+        register_human_source(
+            source, workspace_root=self.workspace,
+            source_id="human-national-geographic", language="en",
+            genre="science-news",
+            source_group_id="national-geographic-130514-dogs-domestication",
+            reference="https://example.test/human", title="Story",
+            author="Reporter", publisher="Publisher",
+            published_date="2013-05-14", text_scope="article-body",
+            retrieved_at="2026-08-02T10:00:00Z",
+            acquisition_method="publisher-export",
+        )
+
+        result = inspect_source_intake(
+            workspace_root=self.workspace,
+            split_salt="synthetic-origin-en-v1",
+        )
+
+        self.assertFalse(result.ready_for_build)
+        self.assertEqual(result.records, 1)
+        self.assertEqual(result.groups, 1)
+        self.assertEqual(result.split_labels["train"]["human"], 1)
+        self.assertEqual(result.split_labels["train"]["synthetic"], 0)
+        self.assertEqual(len(result.missing_split_labels), 5)
+        self.assertEqual(result.ineligible_sources, ())
+        self.assertEqual(result.sources[0]["split"], "train")
+
+    def test_inspection_reports_ready_balanced_split_matrix(self) -> None:
+        groups = {
+            "train": "group-0",
+            "calibration": "group-1",
+            "test": "group-7",
+        }
+        for split, group in groups.items():
+            human = self._input(
+                f"human-{split}.txt", _long_text(f"human-{split}")
+            )
+            synthetic = self._input(
+                f"synthetic-{split}.txt", _long_text(f"synthetic-{split}")
+            )
+            prompt = self._input(f"prompt-{split}.txt", f"Prompt for {split}.")
+            register_human_source(
+                human, workspace_root=self.workspace,
+                source_id=f"human-{split}", language="en", genre="news",
+                source_group_id=group, reference=f"https://example.test/{split}",
+                title=f"{split} story", author="Reporter", publisher="Publisher",
+                published_date="2013-05-14", text_scope="article-body",
+                retrieved_at="2026-08-02T10:00:00Z",
+                acquisition_method="publisher-export",
+            )
+            register_synthetic_source(
+                synthetic, prompt, workspace_root=self.workspace,
+                source_id=f"synthetic-{split}", language="en", genre="news",
+                source_group_id=group, generated_at="2026-08-02T10:01:00Z",
+                provider="provider", model="model", model_version="snapshot",
+                generation_parameters={"temperature": 0},
+            )
+
+        result = inspect_source_intake(
+            workspace_root=self.workspace,
+            split_salt="intake-status-v1",
+        )
+
+        self.assertTrue(result.ready_for_build)
+        self.assertEqual(result.records, 6)
+        self.assertEqual(result.groups, 3)
+        self.assertEqual(result.missing_split_labels, ())
+        self.assertEqual(result.ineligible_sources, ())
+        self.assertEqual(
+            result.split_labels,
+            {
+                "train": {"human": 1, "synthetic": 1},
+                "calibration": {"human": 1, "synthetic": 1},
+                "test": {"human": 1, "synthetic": 1},
+            },
+        )
+
+    def test_inspection_blocks_ineligible_source(self) -> None:
+        source = self._input("short.txt", "Too short for calibration.")
+        register_human_source(
+            source, workspace_root=self.workspace,
+            source_id="human-short", language="en", genre="news",
+            source_group_id="group-0", reference="https://example.test/short",
+            title="Short", author="Reporter", publisher="Publisher",
+            published_date="2013-05-14", text_scope="article-body",
+            retrieved_at="2026-08-02T10:00:00Z", acquisition_method="export",
+        )
+
+        result = inspect_source_intake(
+            workspace_root=self.workspace,
+            split_salt="intake-status-v1",
+        )
+
+        self.assertFalse(result.ready_for_build)
+        self.assertEqual(result.ineligible_sources, ("human-short",))
 
     def test_manifest_assembly_rejects_changed_synthetic_prompt(self) -> None:
         source = self._input("synthetic.txt", _long_text("synthetic"))
