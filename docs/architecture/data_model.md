@@ -154,10 +154,12 @@ The normalized `TRANSCRIPT` derived artifact records the acquisition and raw
 artifact identifiers and digest in its payload. WebVTT and SubRip timestamps
 remain recoverable from the immutable raw artifact even though the normalized
 analytical text omits them. Caption cues are not represented as paragraphs;
-exact word overlap is removed only when adjacent cues overlap in time, and the
-normalization metadata records both cue and removal counts. Publisher captions,
-human-created captions and automatically generated captions remain
-distinguishable; Argus does not treat
+exact word overlap is removed when adjacent cues overlap in time. A WebVTT cue
+that touches the previous boundary within 50 milliseconds is eligible only
+when inline word timing marks its repeated roll-up prefix; only that prefix can
+be removed, while newly timed words remain intact. The normalization metadata
+records both cue and removal counts. Publisher captions, human-created captions
+and automatically generated captions remain distinguishable; Argus does not treat
 their reliability as equal or silently relabel one kind as another.
 
 Importing provider output does not prove that the transcript is complete or

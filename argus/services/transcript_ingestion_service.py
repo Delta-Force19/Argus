@@ -26,8 +26,12 @@ _TIMING_LINE = re.compile(
     r"((?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3})(?:\s+.*)?$"
 )
 _CUE_TAG = re.compile(r"<[^>]+>")
+_INLINE_TIMESTAMP = re.compile(
+    r"<(?:\d{1,2}:)?\d{2}:\d{2}\.\d{3}>"
+)
 _BCP47 = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 _MIN_PARTIAL_OVERLAP_WORDS = 2
+_ROLLING_BOUNDARY_TOLERANCE_MS = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,7 @@ class _CaptionCue:
     start_ms: int
     end_ms: int
     text: str
+    rollup_prefix_word_count: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +72,7 @@ class TranscriptIngestionService:
     """
 
     METHOD = "deterministic-transcript-normalization"
-    METHOD_VERSION = "2"
+    METHOD_VERSION = "3"
     SCHEMA_VERSION = "1"
 
     def __init__(
@@ -309,11 +314,20 @@ def _caption_text(
         if timing_index is None:
             continue
         cue_lines = lines[timing_index + 1:]
-        cue = " ".join(
-            _CUE_TAG.sub("", unescape(line)).strip()
+        raw_cue = " ".join(
+            unescape(line).strip()
             for line in cue_lines
             if line.strip()
         ).strip()
+        inline_timestamp = _INLINE_TIMESTAMP.search(raw_cue)
+        rollup_prefix_word_count = None
+        if inline_timestamp is not None:
+            rollup_prefix_word_count = len(
+                _CUE_TAG.sub(
+                    "", raw_cue[:inline_timestamp.start()]
+                ).split()
+            )
+        cue = _CUE_TAG.sub("", raw_cue).strip()
         if cue:
             if timing_match is None:
                 raise RuntimeError("Caption timing match was not retained.")
@@ -321,6 +335,7 @@ def _caption_text(
                 start_ms=_timestamp_ms(timing_match.group(1)),
                 end_ms=_timestamp_ms(timing_match.group(2)),
                 text=cue,
+                rollup_prefix_word_count=rollup_prefix_word_count,
             ))
     words: list[str] = []
     removed_overlap_word_count = 0
@@ -328,17 +343,30 @@ def _caption_text(
     for cue in cues:
         cue_words = cue.text.split()
         overlap = 0
-        if previous is not None and cue.start_ms < previous.end_ms:
-            overlap = _exact_word_overlap(words, cue_words)
+        if previous is not None and _may_roll_up(previous, cue):
+            overlap_candidate = cue_words
+            if cue.rollup_prefix_word_count is not None:
+                overlap_candidate = cue_words[:cue.rollup_prefix_word_count]
+            overlap = _exact_word_overlap(words, overlap_candidate)
             if (
                     overlap < _MIN_PARTIAL_OVERLAP_WORDS
-                    and overlap != len(cue_words)
+                    and overlap != len(overlap_candidate)
             ):
                 overlap = 0
         words.extend(cue_words[overlap:])
         removed_overlap_word_count += overlap
         previous = cue
     return " ".join(words), len(cues), removed_overlap_word_count
+
+
+def _may_roll_up(previous: _CaptionCue, incoming: _CaptionCue) -> bool:
+    if incoming.start_ms < previous.end_ms:
+        return True
+    return (
+        incoming.rollup_prefix_word_count is not None
+        and incoming.start_ms - previous.end_ms
+        <= _ROLLING_BOUNDARY_TOLERANCE_MS
+    )
 
 
 def _timestamp_ms(value: str) -> int:

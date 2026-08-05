@@ -87,7 +87,7 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["text"], "First story. Second story."
         )
-        self.assertEqual(artifact.method_version, "2")
+        self.assertEqual(artifact.method_version, "3")
         self.assertEqual(
             artifact.payload["normalization"],
             {
@@ -148,6 +148,74 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             artifact.payload["text"], "Never again. Never again."
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            0,
+        )
+
+    def test_collapses_timestamped_rollup_at_touching_boundaries(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:02.000\n"
+            b"At least 25 people were<00:00:01.500><c> killed</c>\n\n"
+            b"00:00:02.010 --> 00:00:04.000\n"
+            b"At least 25 people were killed"
+            b"<00:00:02.400><c> overnight.</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "At least 25 people were killed overnight.",
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            6,
+        )
+
+    def test_preserves_new_timestamped_repetition_at_touching_boundary(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:01.000\n"
+            b"Never again.\n\n"
+            b"00:00:01.000 --> 00:00:02.000\n"
+            b"<00:00:01.000><c>Never again.</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"], "Never again. Never again."
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            0,
+        )
+
+    def test_preserves_rollup_prefix_after_material_timing_gap(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:01.000\nNever again.\n\n"
+            b"00:00:01.200 --> 00:00:02.000\n"
+            b"Never again.<00:00:01.500><c> Today.</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "Never again. Never again. Today.",
         )
         self.assertEqual(
             artifact.payload["normalization"]["removed_overlap_word_count"],

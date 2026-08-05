@@ -752,10 +752,15 @@ The command never downloads a video or guesses caption authorship.
 
 Caption cue boundaries are transport structure, not paragraph or event
 boundaries. Normalization therefore produces continuous speech and collapses
-only exact word overlap carried by temporally overlapping cues, as used by
-rolling YouTube captions. The payload records the cue count and number of
-removed overlap words. The immutable raw artifact remains the authority for
-timing, layout, and independent reproduction of the transformation.
+only exact word overlap supported by cue timing. Overlapping cues may carry an
+exact repeated prefix. Boundary-touching WebVTT cues may do the same only when
+an inline word timestamp identifies the technical roll-up prefix; text after
+that timestamp remains new speech even when its words repeat earlier speech.
+A bounded 50-millisecond tolerance covers provider boundary quantization but
+does not turn materially separated cues into deduplication candidates. The
+payload records the cue count and number of removed overlap words. The
+immutable raw artifact remains the authority for timing, layout, and
+independent reproduction of the transformation.
 
 The first provider adapter applies the same contract to YouTube caption
 tracks. `youtube-transcript-tracks` uses pinned `yt-dlp` metadata to list exact
