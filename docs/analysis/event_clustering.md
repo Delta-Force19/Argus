@@ -43,7 +43,7 @@ Candidates may overlap and alternative methods may produce different spans.
 They are not segmentation runs, do not assert complete document coverage, and
 carry no event or cluster assignment.
 
-## Deterministic structural proposal
+## Deterministic boundary proposal
 
 `inspect-document-text` exposes the selected immutable text artifact as exact
 non-empty paragraph blocks. Each line includes its half-open offsets, text
@@ -53,11 +53,20 @@ If a document version has several supported text artifacts, the operator must
 select one explicitly rather than allowing Argus to combine them.
 
 `segment-event-fragments` implements the first conservative boundary proposer.
-It uses only blank-line paragraph structure and repeated heading-like blocks.
-The first adjacent title/section-heading pair is treated as document title plus
-first section, avoiding a title-only fragment. When no repeatable internal
-heading boundary exists, the method abstains from internal splitting and emits
-one whole-content fallback candidate with an explicit limitation.
+For ordinary text it uses blank-line paragraph structure and repeated
+heading-like blocks. The first adjacent title/section-heading pair is treated
+as document title plus first section, avoiding a title-only fragment. When no
+repeatable internal heading boundary exists, the structural method abstains
+from internal splitting and emits one whole-content fallback candidate.
+
+For a transcript with validated cue provenance, method
+`deterministic-cue-gap-segmentation` instead proposes a boundary before each
+contributing cue whose gap from the preceding contributing cue is at least
+2200 milliseconds. It uses the cue output ranges to preserve exact half-open
+text offsets. The threshold is a conservative initial calibration, not a
+semantic decision: shorter editorial transitions can be missed and a long
+pause inside one story can still produce a false boundary. Both limitations
+are attached to every proposal.
 
 The command is read-only by default. `--persist` stores the exact proposals via
 the existing candidate contract and is idempotent for the same artifact,

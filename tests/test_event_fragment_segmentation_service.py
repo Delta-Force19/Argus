@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from argus.acquisition import StoredArtifact
 from argus.database import Base
 from argus.documents import DerivedArtifactType, DocumentType
-from argus.models import EventFragmentCandidate
+from argus.models import DerivedArtifact, EventFragmentCandidate
 from argus.services.event_fragment_segmentation_service import (
     inspect_document_text,
     segment_event_fragments,
@@ -207,6 +207,97 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
             report.event_text_readiness.ready_for_event_analysis
         )
 
+    def test_cue_timing_proposes_five_bulletin_fragments(self) -> None:
+        version = self._version("timed-bulletin")
+        store = FileSystemRawArtifactStore(Path(self.temporary_directory.name))
+        content = """WEBVTT
+
+00:00:00.000 --> 00:00:01.000
+Gaza aid.
+
+00:00:03.100 --> 00:00:04.000
+Deliveries continue.
+
+00:00:06.300 --> 00:00:07.000
+Trump visits Scotland.
+
+00:00:07.100 --> 00:00:08.000
+Talks continue.
+
+00:00:10.300 --> 00:00:11.000
+Protesters gather.
+
+00:00:11.100 --> 00:00:12.000
+Police monitor them.
+
+00:00:14.300 --> 00:00:15.000
+Cyprus fires spread.
+
+00:00:15.100 --> 00:00:16.000
+Crews respond.
+
+00:00:18.300 --> 00:00:19.000
+Airport scanners change.
+
+00:00:19.100 --> 00:00:20.000
+Rules await approval.
+""".encode()
+        result = TranscriptIngestionService(
+            self.session,
+            artifact_store=store,
+        ).ingest(
+            document_version_id=version.id,
+            content=content,
+            provider="test-provider",
+            provider_version="1",
+            requested_location="https://example.test/video/timed-bulletin",
+            retrieved_at=datetime(2026, 8, 5, tzinfo=timezone.utc),
+            language="en",
+            transcript_kind=TranscriptKind.HUMAN_CREATED,
+            transcript_format=TranscriptFormat.WEBVTT,
+            media_type="text/vtt; charset=utf-8",
+        )
+        self.session.commit()
+
+        report = segment_event_fragments(
+            document_version_id=version.id,
+            text_derived_artifact_id=result.transcript_artifact_id,
+            session_factory=self._session,
+            artifact_store=store,
+        )
+
+        self.assertEqual(report.method, "deterministic-cue-gap-segmentation")
+        self.assertEqual(
+            report.boundary_basis,
+            "cue-output-gap-at-least-2200ms",
+        )
+        self.assertEqual(report.fragment_count, 5)
+        self.assertEqual(
+            tuple(item.start_cue_index for item in report.items),
+            (1, 3, 5, 7, 9),
+        )
+        self.assertEqual(
+            tuple(item.gap_before_ms for item in report.items),
+            (None, 2300, 2300, 2300, 2300),
+        )
+        fragments = [
+            self._artifact_text(result.transcript_artifact_id)[
+                item.start_char:item.end_char
+            ]
+            for item in report.items
+        ]
+        self.assertEqual(fragments, [
+            "Gaza aid. Deliveries continue.",
+            "Trump visits Scotland. Talks continue.",
+            "Protesters gather. Police monitor them.",
+            "Cyprus fires spread. Crews respond.",
+            "Airport scanners change. Rules await approval.",
+        ])
+        self.assertTrue(any(
+            "not proof" in value
+            for value in report.items[0].quality_limitations
+        ))
+
     def test_unanchored_transcript_is_blocked(self) -> None:
         version = self._version("video/unanchored-transcript")
         self._artifact(
@@ -298,6 +389,11 @@ class EventFragmentSegmentationServiceTests(unittest.TestCase):
             payload={"text": text, "character_count": len(text)},
             quality_limitations=(),
         )
+
+    def _artifact_text(self, artifact_id: int) -> str:
+        artifact = self.session.get(DerivedArtifact, artifact_id)
+        assert artifact is not None
+        return artifact.payload["text"]
 
     @staticmethod
     def _hash(value: str) -> str:

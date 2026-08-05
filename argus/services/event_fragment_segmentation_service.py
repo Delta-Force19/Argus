@@ -5,7 +5,9 @@ import re
 
 from sqlalchemy.orm import Session
 
+from argus.acquisition import RawArtifactStore
 from argus.database import SessionLocal
+from argus.documents import DerivedArtifactType
 from argus.models import DerivedArtifact, Document, DocumentVersion
 from argus.services.event_text_readiness_service import (
     EventTextReadiness,
@@ -22,11 +24,18 @@ from argus.storage.derived_artifact_repository import (
 from argus.services.transcript_provenance_service import (
     transcript_provenance_issue,
 )
+from argus.services.transcript_timeline_service import (
+    TranscriptTimelineReport,
+    inspect_transcript_timeline,
+)
 
 
 METHOD = "deterministic-heading-paragraph-segmentation"
 METHOD_VERSION = "1"
+TRANSCRIPT_METHOD = "deterministic-cue-gap-segmentation"
+TRANSCRIPT_METHOD_VERSION = "1"
 CREATED_BY = "argus"
+_TRANSCRIPT_BOUNDARY_GAP_MS = 2200
 _BLANK_LINE = re.compile(r"(?:\r?\n[ \t]*){2,}")
 _WORD = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
@@ -59,6 +68,9 @@ class EventFragmentProposal:
     text_hash: str
     rationale: str
     quality_limitations: tuple[str, ...]
+    start_cue_index: int | None = None
+    start_ms: int | None = None
+    gap_before_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,8 +130,9 @@ def segment_event_fragments(
         text_derived_artifact_id: int | None = None,
         persist: bool = False,
         session_factory: Callable[[], Session] = SessionLocal,
+        artifact_store: RawArtifactStore | None = None,
 ) -> EventFragmentSegmentationReport:
-    """Propose conservative structural spans and optionally persist them."""
+    """Propose conservative structural or cue-timed spans."""
 
     with session_factory() as session:
         document, artifact, text = _select_text_source(
@@ -133,18 +146,46 @@ def segment_event_fragments(
                 "Event fragment persistence is blocked: "
                 + " ".join(readiness.reasons)
             )
-        spans, boundary_basis = _propose_spans(text)
+        timeline = None
+        if _has_cue_provenance(artifact):
+            timeline = inspect_transcript_timeline(
+                document_version_id=document_version_id,
+                transcript_artifact_id=artifact.id,
+                session_factory=session_factory,
+                artifact_store=artifact_store,
+            )
+        spans, boundary_basis = _propose_spans(text, timeline=timeline)
+        method, method_version = _method_for(boundary_basis)
         limitations = (
             _limitations(boundary_basis)
             + readiness.reasons
             + readiness.limitations
         )
+        timing_by_start = (
+            {}
+            if timeline is None
+            else {
+                item.output_start_char: item
+                for item in timeline.items
+                if item.contributes_output
+            }
+        )
         items: list[EventFragmentProposal] = []
         try:
             for index, (start, end) in enumerate(spans, start=1):
+                boundary_cue = timing_by_start.get(start)
+                timing_rationale = ""
+                if boundary_cue is not None:
+                    timing_rationale = (
+                        f" start_cue={boundary_cue.cue_index}; "
+                        f"start_ms={boundary_cue.start_ms}; "
+                        "gap_before_ms="
+                        f"{boundary_cue.gap_before_ms}."
+                    )
                 rationale = (
-                    f"Structural fragment {index}/{len(spans)}; "
+                    f"Deterministic fragment candidate {index}/{len(spans)}; "
                     f"boundary_basis={boundary_basis}."
+                    f"{timing_rationale}"
                 )
                 event_fragment_id = None
                 if persist:
@@ -154,8 +195,8 @@ def segment_event_fragments(
                         text_derived_artifact_id=artifact.id,
                         start_char=start,
                         end_char=end,
-                        method=METHOD,
-                        method_version=METHOD_VERSION,
+                        method=method,
+                        method_version=method_version,
                         created_by=CREATED_BY,
                         rationale=rationale,
                         quality_limitations=limitations,
@@ -169,6 +210,18 @@ def segment_event_fragments(
                         text_hash=_hash(text[start:end]),
                         rationale=rationale,
                         quality_limitations=limitations,
+                        start_cue_index=(
+                            None if boundary_cue is None
+                            else boundary_cue.cue_index
+                        ),
+                        start_ms=(
+                            None if boundary_cue is None
+                            else boundary_cue.start_ms
+                        ),
+                        gap_before_ms=(
+                            None if boundary_cue is None
+                            else boundary_cue.gap_before_ms
+                        ),
                     )
                 )
             if persist:
@@ -179,8 +232,8 @@ def segment_event_fragments(
         return EventFragmentSegmentationReport(
             document_version_id=document_version_id,
             text_derived_artifact_id=artifact.id,
-            method=METHOD,
-            method_version=METHOD_VERSION,
+            method=method,
+            method_version=method_version,
             persisted=persist,
             boundary_basis=boundary_basis,
             items=tuple(items),
@@ -285,7 +338,13 @@ def _paragraph_spans(text: str) -> tuple[tuple[int, int], ...]:
     return tuple(spans)
 
 
-def _propose_spans(text: str) -> tuple[tuple[tuple[int, int], ...], str]:
+def _propose_spans(
+        text: str,
+        *,
+        timeline: TranscriptTimelineReport | None = None,
+) -> tuple[tuple[tuple[int, int], ...], str]:
+    if timeline is not None:
+        return _cue_timed_spans(text, timeline)
     blocks = _paragraph_spans(text)
     if not blocks:
         raise ValueError("Derived text does not contain non-whitespace content.")
@@ -320,6 +379,45 @@ def _propose_spans(text: str) -> tuple[tuple[tuple[int, int], ...], str]:
     return tuple(spans), "heading-like-paragraphs"
 
 
+def _cue_timed_spans(
+        text: str,
+        timeline: TranscriptTimelineReport,
+) -> tuple[tuple[tuple[int, int], ...], str]:
+    contributing = [item for item in timeline.items if item.contributes_output]
+    if not contributing:
+        raise ValueError("Transcript cue provenance contains no text output.")
+    starts = [contributing[0].output_start_char]
+    starts.extend(
+        item.output_start_char
+        for item in contributing[1:]
+        if item.gap_before_ms is not None
+        and item.gap_before_ms >= _TRANSCRIPT_BOUNDARY_GAP_MS
+    )
+    spans: list[tuple[int, int]] = []
+    for index, start in enumerate(starts):
+        raw_end = starts[index + 1] if index + 1 < len(starts) else len(text)
+        span = _trimmed_span(text, start, raw_end)
+        if span is not None:
+            spans.append(span)
+    return tuple(spans), f"cue-output-gap-at-least-{_TRANSCRIPT_BOUNDARY_GAP_MS}ms"
+
+
+def _has_cue_provenance(artifact: DerivedArtifact) -> bool:
+    if artifact.artifact_type is not DerivedArtifactType.TRANSCRIPT:
+        return False
+    normalization = artifact.payload.get("normalization")
+    return (
+        isinstance(normalization, dict)
+        and "cue_provenance" in normalization
+    )
+
+
+def _method_for(boundary_basis: str) -> tuple[str, str]:
+    if boundary_basis.startswith("cue-output-gap-at-least-"):
+        return TRANSCRIPT_METHOD, TRANSCRIPT_METHOD_VERSION
+    return METHOD, METHOD_VERSION
+
+
 def _trimmed_span(
         text: str,
         start: int,
@@ -351,6 +449,13 @@ def _limitations(boundary_basis: str) -> tuple[str, ...]:
         "Structural boundaries are not proof that a span describes one event.",
         "Headings and paragraph separators may be missing or extracted incorrectly.",
     )
+    if boundary_basis.startswith("cue-output-gap-at-least-"):
+        return common + (
+            "Cue timing gaps are boundary proposals, not proof that adjacent "
+            "spans describe different events.",
+            "Editorial transitions without a qualifying timing gap remain "
+            "inside one provisional fragment.",
+        )
     if boundary_basis == "whole-content-fallback":
         return common + (
             "No repeatable internal heading boundary was detected; the whole "

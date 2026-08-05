@@ -729,11 +729,15 @@ fails closed when either analysis bundle is built.
 
 Before event reconstruction, `inspect-document-text` exposes exact paragraph
 blocks and offsets from one immutable text artifact. The read-only default of
-`segment-event-fragments` proposes structural spans from blank-line and
-heading-like boundaries. Persistence requires `--persist` and creates only
+`segment-event-fragments` proposes spans from blank-line and heading-like
+boundaries for ordinary text. For a transcript carrying cue provenance, it
+first validates the full map against the immutable raw caption artifact and
+then proposes exact spans at contributing-cue gaps of at least 2200
+milliseconds. Timing boundaries remain provisional and do not establish topic
+or event identity. Persistence requires `--persist` and creates only
 source-anchored candidates through the existing idempotent fragment service;
 it never creates an event or assignment. Ambiguous text artifacts and damaged
-text payloads fail closed.
+text or cue-provenance payloads fail closed.
 
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from

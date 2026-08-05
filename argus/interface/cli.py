@@ -1896,7 +1896,7 @@ def segment_event_fragments_command(
             ...,
             "--document-version-id",
             min=1,
-            help="Exact document version to segment structurally.",
+            help="Exact document version to segment deterministically.",
         ),
         text_artifact_id: int | None = typer.Option(
             None,
@@ -1910,7 +1910,7 @@ def segment_event_fragments_command(
             help="Persist the proposals as candidates; never assign events.",
         ),
 ) -> None:
-    """Preview or persist deterministic structural fragment candidates."""
+    """Preview or persist deterministic fragment candidates."""
 
     try:
         report = segment_event_fragments(
@@ -1935,6 +1935,14 @@ def segment_event_fragments_command(
         "event_assignments=0"
     )
     for index, item in enumerate(report.items, start=1):
+        cue_evidence = ""
+        if item.start_cue_index is not None:
+            cue_evidence = (
+                f" start_cue={item.start_cue_index} "
+                f"start_ms={item.start_ms} "
+                "gap_before_ms="
+                f"{item.gap_before_ms if item.gap_before_ms is not None else 'none'}"
+            )
         typer.echo(
             f"fragment={index} "
             "event_fragment_id="
@@ -1942,6 +1950,7 @@ def segment_event_fragments_command(
             f"span={item.start_char}:{item.end_char} "
             f"text_hash={item.text_hash} "
             f"rationale={item.rationale!r} event_assignment=none"
+            f"{cue_evidence}"
         )
         for limitation in item.quality_limitations:
             typer.echo(f"fragment={index} limitation={limitation!r}")

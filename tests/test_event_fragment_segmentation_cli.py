@@ -85,10 +85,10 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
         segment_event_fragments.return_value = EventFragmentSegmentationReport(
             document_version_id=34,
             text_derived_artifact_id=12,
-            method="deterministic-heading-paragraph-segmentation",
+            method="deterministic-cue-gap-segmentation",
             method_version="1",
             persisted=False,
-            boundary_basis="heading-like-paragraphs",
+            boundary_basis="cue-output-gap-at-least-2200ms",
             items=(
                 EventFragmentProposal(
                     event_fragment_id=None,
@@ -97,6 +97,9 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
                     text_hash="c" * 64,
                     rationale="Structural fragment 1/1.",
                     quality_limitations=("Not an event decision.",),
+                    start_cue_index=41,
+                    start_ms=75350,
+                    gap_before_ms=2800,
                 ),
             ),
             event_text_readiness=READY,
@@ -116,6 +119,10 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
         self.assertIn("fragments=1 persisted=false", result.output)
         self.assertIn("event_fragment_id=none", result.output)
         self.assertIn("event_assignments=0", result.output)
+        self.assertIn(
+            "start_cue=41 start_ms=75350 gap_before_ms=2800",
+            result.output,
+        )
 
     @patch("argus.interface.cli.inspect_transcript_timeline")
     @patch("argus.interface.cli.configure_logging")
