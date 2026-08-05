@@ -112,6 +112,25 @@ class EventObservationRepository(BaseRepository[EventObservationCandidate]):
         )
         return list(self.session.scalars(statement).all())
 
+    def get_for_artifact(
+            self,
+            artifact_id: int,
+    ) -> list[EventObservationCandidate]:
+        statement = (
+            select(EventObservationCandidate)
+            .where(
+                EventObservationCandidate.derived_artifact_id == artifact_id
+            )
+            .order_by(
+                EventObservationCandidate.event_fragment_candidate_id.asc(),
+                EventObservationCandidate.start_char.asc(),
+                EventObservationCandidate.end_char.asc(),
+                EventObservationCandidate.observation_type.asc(),
+                EventObservationCandidate.id.asc(),
+            )
+        )
+        return list(self.session.scalars(statement).all())
+
     @staticmethod
     def _signatures(
             observations: Sequence[EventObservationCandidate],

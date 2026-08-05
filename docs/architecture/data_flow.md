@@ -750,6 +750,16 @@ fragment methods are rejected as ambiguous unless the operator selects one
 explicitly. No relation between observations and no real-world event identity
 is inferred.
 
+`profile-event-fragments` performs the next deterministic reduction. It binds
+to one exact `EVENT_OBSERVATIONS` artifact, groups retained signals by type and
+normalized value, and records source observation identifiers and occurrence
+counts. Language-specific generic actions, unresolved pronouns, vague
+determined objects, unsupported object heads and oversized dependency subtrees
+remain visible as explicit exclusions with versioned reason codes. A
+conservation check rejects any profile that loses or double-counts a raw
+observation. Optional persistence creates an immutable
+`EVENT_FRAGMENT_PROFILES` artifact; it creates no event or assignment.
+
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from
 event comparison and fragment persistence until a source-anchored transcript

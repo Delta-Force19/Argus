@@ -102,6 +102,33 @@ does not resolve coreference or create subject-predicate-object triples. It
 creates no `Event`, claim, cluster or assignment. Those decisions require
 cross-source evidence and later calibrated reconstruction.
 
+## Implemented fragment profiles
+
+`profile-event-fragments` consumes one exact persisted `EVENT_OBSERVATIONS`
+artifact. The versioned deterministic profiler retains named-entity signals,
+uses separate English and Russian generic-action lists, filters non-lexical
+and low-information action candidates, and admits grammatical objects only
+when their dependency head is a noun or proper noun, their subtree remains
+within explicit size limits, and a determiner or possessive is not attached to
+a versioned vague nominal head. Exact repeated type/value pairs are grouped
+while preserving every source observation identifier, surface form,
+occurrence count and source range.
+
+Every raw observation is accounted for exactly once. An observation either
+contributes to one grouped signal or receives a stable exclusion code such as
+`generic_action`, `pronominal_object`, `vague_object` or `oversized_object`,
+plus a rationale.
+Preview is read-only. `--persist` stores the complete retained and excluded
+decision set as an immutable `EVENT_FRAGMENT_PROFILES` derived artifact and is
+idempotent for the same input and method version. `--show-exclusions` exposes
+the candidate-level audit without making the default CLI output needlessly
+large.
+
+The profile is a comparison input, not an event reconstruction. Lexical
+filters can omit meaningful context, exact normalization does not resolve
+aliases, retained mentions have no proven semantic role, and no cross-source
+identity or event assignment is created.
+
 ## Event-content readiness
 
 Event analysis must distinguish source content from page metadata. Text

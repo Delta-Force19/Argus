@@ -28,6 +28,7 @@ class DerivedArtifactType(str, Enum):
     ENTITY_CANDIDATES = "entity_candidates"
     ALIAS_PROPOSALS = "alias_proposals"
     EVENT_OBSERVATIONS = "event_observations"
+    EVENT_FRAGMENT_PROFILES = "event_fragment_profiles"
     OTHER = "other"
 
 

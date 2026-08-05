@@ -28,7 +28,9 @@ Argus is under active development. The current codebase includes:
 - explainable pairwise document similarity signals for future event
   clustering;
 - source-located participant, place, time, action, and object candidates from
-  persisted event fragments. These are text observations, not event facts.
+  persisted event fragments;
+- deterministic fragment profiles that group retained observations and record
+  every exclusion reason. These remain text measurements, not event facts.
 
 Event reconstruction, claim extraction, fact verification, narrative
 detection, and calibrated event clustering are not implemented yet. Their
@@ -92,6 +94,7 @@ python main.py inspect-document-text --document-version-id 34
 python main.py inspect-transcript-timeline --help
 python main.py segment-event-fragments --document-version-id 34
 python main.py extract-event-observations --document-version-id 34
+python main.py profile-event-fragments --document-version-id 34
 ```
 
 Use `python main.py --help` as the authoritative command inventory; analytical

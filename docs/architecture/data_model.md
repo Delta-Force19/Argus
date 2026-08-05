@@ -249,6 +249,21 @@ and quality limitations. Queryable rows are an idempotent projection of that
 payload. A named entity merely proposes a possible role; a grammatical verb or
 object does not establish a factual subject-predicate-object relationship.
 
+### Event Fragment Profile
+
+An `EVENT_FRAGMENT_PROFILES` derived artifact is an immutable, explainable
+reduction of one exact `EVENT_OBSERVATIONS` artifact. For each fragment it
+stores grouped retained signals with their raw observation identifiers,
+surface forms, occurrence counts and source ranges. It also stores a decision
+for every excluded observation with a stable reason code and rationale.
+
+The profile does not overwrite or replace the raw observation artifact. Its
+integrity rule requires every input observation to appear exactly once across
+retained occurrences and exclusions. The profiler method, version, parent
+artifact identifier and parent content hash make the reduction reproducible.
+The artifact is intended for later similarity features; it is not an `Event`,
+semantic-role graph, claim or factual assertion.
+
 ### Entity Mention
 
 An `EntityMention` is a model observation that a text span appears to refer to

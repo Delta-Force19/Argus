@@ -115,6 +115,10 @@ from argus.services.event_observation_extraction_service import (
     extract_event_observations,
 )
 from argus.event_observations import EventObservationType
+from argus.event_fragment_profiles import ProfileExclusionReason
+from argus.services.event_fragment_profile_service import (
+    profile_event_fragments,
+)
 from argus.services.transcript_ingestion_service import ingest_transcript_file
 from argus.services.transcript_timeline_service import (
     inspect_transcript_timeline,
@@ -2032,6 +2036,100 @@ def extract_event_observations_command(
             f"text={json.dumps(item.surface_text, ensure_ascii=False)} "
             f"rationale={item.rationale!r} event_assignment=none"
         )
+    for limitation in report.quality_limitations:
+        typer.echo(f"limitation={limitation!r}")
+
+
+@app.command("profile-event-fragments")
+def profile_event_fragments_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose observations will be profiled.",
+        ),
+        event_observation_artifact_id: int | None = typer.Option(
+            None,
+            "--event-observation-artifact-id",
+            min=1,
+            help="Exact observation artifact when the version has several.",
+        ),
+        persist: bool = typer.Option(
+            False,
+            "--persist",
+            help="Persist the complete profile decisions as a derived artifact.",
+        ),
+        show_exclusions: bool = typer.Option(
+            False,
+            "--show-exclusions",
+            help="Print every excluded raw observation and its reason.",
+        ),
+) -> None:
+    """Group useful event signals and explain every deterministic exclusion."""
+
+    try:
+        report = profile_event_fragments(
+            document_version_id=document_version_id,
+            event_observation_artifact_id=event_observation_artifact_id,
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        "event_observation_artifact_id="
+        f"{report.event_observation_artifact_id} "
+        "event_fragment_profile_artifact_id="
+        f"{report.event_fragment_profile_artifact_id if report.event_fragment_profile_artifact_id is not None else 'none'} "
+        f"fragments={len(report.profiles)} "
+        f"raw_observations={report.raw_observation_count} "
+        f"retained_occurrences={report.retained_occurrence_count} "
+        f"signals={report.signal_count} "
+        f"excluded={report.exclusion_count} "
+        f"persisted={str(report.persisted).lower()} "
+        f"method={report.profile_method!r} "
+        f"method_version={report.profile_method_version!r} "
+        "event_assignments=0"
+    )
+    for profile in report.profiles:
+        signal_counts = " ".join(
+            f"{observation_type.value}="
+            f"{profile.signal_count(observation_type)}"
+            for observation_type in EventObservationType
+        )
+        exclusion_counts = " ".join(
+            f"excluded_{reason.value}={profile.exclusion_count(reason)}"
+            for reason in ProfileExclusionReason
+            if profile.exclusion_count(reason)
+        )
+        typer.echo(
+            f"event_fragment_id={profile.event_fragment_id} "
+            f"retained_occurrences={profile.retained_occurrence_count} "
+            f"signals={len(profile.signals)} "
+            f"excluded={len(profile.exclusions)} {signal_counts} "
+            f"{exclusion_counts}".rstrip()
+        )
+        for signal in profile.signals:
+            typer.echo(
+                f"event_fragment_id={profile.event_fragment_id} "
+                f"type={signal.observation_type.value!r} "
+                f"value={signal.normalized_value!r} "
+                f"occurrences={signal.occurrence_count} "
+                f"observation_ids={','.join(map(str, signal.observation_ids))} "
+                f"extent={signal.first_start_char}:{signal.last_end_char} "
+                f"surface_forms={json.dumps(signal.surface_forms, ensure_ascii=False)} "
+                f"rationale={signal.rationale!r} event_assignment=none"
+            )
+        if show_exclusions:
+            for item in profile.exclusions:
+                typer.echo(
+                    f"event_fragment_id={profile.event_fragment_id} "
+                    f"excluded_observation_id={item.observation_id} "
+                    f"type={item.observation_type.value!r} "
+                    f"value={item.normalized_value!r} "
+                    f"reason={item.reason.value!r} "
+                    f"rationale={item.rationale!r}"
+                )
     for limitation in report.quality_limitations:
         typer.echo(f"limitation={limitation!r}")
 
