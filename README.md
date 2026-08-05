@@ -16,7 +16,7 @@ Argus is under active development. The current codebase includes:
 - RSS collection and normalized source/endpoint storage;
 - immutable retrieval, raw-artifact, document, and document-version records;
 - provenance-anchored transcript intake for plain text, WebVTT, SubRip, and
-  exact YouTube caption tracks;
+  exact YouTube caption tracks, including validated cue-to-text maps;
 - main-text extraction and legacy English discourse analysis;
 - versioned entity mentions, candidate generation, alias proposals, and
   reviewed entity resolution;
@@ -87,6 +87,7 @@ python main.py ingest-transcript --help
 python main.py youtube-transcript-tracks --help
 python main.py ingest-youtube-transcript --help
 python main.py inspect-document-text --document-version-id 34
+python main.py inspect-transcript-timeline --help
 python main.py segment-event-fragments --document-version-id 34
 ```
 

@@ -153,7 +153,25 @@ external track identifier when available.
 The normalized `TRANSCRIPT` derived artifact records the acquisition and raw
 artifact identifiers and digest in its payload. WebVTT and SubRip timestamps
 remain recoverable from the immutable raw artifact even though the normalized
-analytical text omits them. Caption cues are not represented as paragraphs;
+analytical text omits timing syntax. Normalization version 6/schema 2 also
+records a cue-provenance map. Each cue entry contains:
+
+- a one-based cue index and canonical source-block index;
+- the SHA-256 digest of that canonical source block;
+- cue start and end milliseconds;
+- normalized cue text;
+- the exact normalized output character range, when the cue contributed text;
+- removed cross-cue and internal overlap counts;
+- an explicit `technical_relay` or `exact_overlap` reason when the cue
+  contributes no output range.
+
+The source-block index addresses the transcript after UTF-8 BOM removal and
+CRLF/CR-to-LF newline canonicalization; the raw artifact itself is never
+rewritten. A consumer must verify the referenced raw bytes and block digests
+before relying on the map. The map has cue-level temporal resolution and must
+not be interpreted as word-level timing.
+
+Caption cues are not represented as paragraphs;
 exact word overlap is removed when adjacent cues overlap in time. A WebVTT cue
 that touches the previous boundary within 50 milliseconds is eligible only
 when inline word timing marks its repeated roll-up prefix; only that prefix can
@@ -165,8 +183,8 @@ suffix and the following cue's prefix at contiguous boundaries. Inline timing,
 when present, bounds the eligible following prefix; the same exact bridge may
 terminate in an untimed final cue. Untimed lines without this three-cue
 evidence are preserved even when equal. This keeps transport duplication
-separate from genuine repeated speech. Metadata records both cue and removal
-counts. Publisher captions,
+separate from genuine repeated speech. Metadata records cue and removal counts
+alongside the map. Publisher captions,
 human-created captions and automatically generated captions remain
 distinguishable; Argus does not treat their reliability as equal or silently
 relabel one kind as another.

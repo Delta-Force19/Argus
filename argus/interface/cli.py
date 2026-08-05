@@ -112,6 +112,9 @@ from argus.services.event_fragment_segmentation_service import (
     segment_event_fragments,
 )
 from argus.services.transcript_ingestion_service import ingest_transcript_file
+from argus.services.transcript_timeline_service import (
+    inspect_transcript_timeline,
+)
 from argus.services.youtube_transcript_ingestion_service import (
     ingest_youtube_transcript,
 )
@@ -1790,6 +1793,100 @@ def inspect_document_text_blocks(
             f"heading_candidate={str(block.heading_candidate).lower()} "
             f"text_hash={block.text_hash} truncated={str(truncated).lower()} "
             f"text={json.dumps(preview, ensure_ascii=False)}"
+        )
+
+
+@app.command("inspect-transcript-timeline")
+def inspect_transcript_timeline_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version owning the transcript artifact.",
+        ),
+        text_artifact_id: int = typer.Option(
+            ...,
+            "--text-artifact-id",
+            min=1,
+            help="Exact transcript artifact whose cue map should be shown.",
+        ),
+        max_cue_chars: int = typer.Option(
+            240,
+            "--max-cue-chars",
+            min=40,
+            max=2000,
+            help="Maximum normalized characters printed for each cue.",
+        ),
+        start_cue: int = typer.Option(
+            1,
+            "--start-cue",
+            min=1,
+            help="One-based first cue to print after validating the full map.",
+        ),
+        limit: int = typer.Option(
+            50,
+            "--limit",
+            min=1,
+            max=500,
+            help="Maximum cues to print after full-map validation.",
+        ),
+) -> None:
+    """Validate and show normalized-text-to-caption-cue provenance."""
+
+    try:
+        report = inspect_transcript_timeline(
+            document_version_id=document_version_id,
+            transcript_artifact_id=text_artifact_id,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if start_cue > len(report.items):
+        raise typer.BadParameter(
+            f"start_cue exceeds the available cue count: {len(report.items)}."
+        )
+    shown_items = report.items[start_cue - 1:start_cue - 1 + limit]
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"text_artifact_id={report.transcript_artifact_id} "
+        f"transcript_acquisition_id={report.transcript_acquisition_id} "
+        f"raw_artifact_id={report.raw_artifact_id} "
+        f"character_count={report.character_count} "
+        f"text_hash={report.text_hash} cues={len(report.items)} "
+        f"contributing_cues={report.contributing_cue_count} "
+        f"suppressed_cues={report.suppressed_cue_count} "
+        f"shown_cues={len(shown_items)} "
+        f"shown_range={start_cue}:{start_cue + len(shown_items) - 1} "
+        "cue_provenance_schema_version="
+        f"{report.cue_provenance_schema_version!r} "
+        f"time_unit={report.time_unit!r}"
+    )
+    for item in shown_items:
+        cue_text = item.normalized_cue_text
+        truncated = len(cue_text) > max_cue_chars
+        if truncated:
+            cue_text = cue_text[:max_cue_chars]
+        output_span = (
+            "none"
+            if item.output_start_char is None
+            else f"{item.output_start_char}:{item.output_end_char}"
+        )
+        gap_before = (
+            "none" if item.gap_before_ms is None else str(item.gap_before_ms)
+        )
+        suppression = item.suppression_reason or "none"
+        typer.echo(
+            f"cue={item.cue_index} "
+            f"source_block={item.source_block_index} "
+            f"time_ms={item.start_ms}:{item.end_ms} "
+            f"duration_ms={item.duration_ms} "
+            f"gap_before_ms={gap_before} output_span={output_span} "
+            f"removed_prefix_words={item.removed_prefix_word_count} "
+            "removed_internal_words="
+            f"{item.removed_internal_overlap_word_count} "
+            f"suppression={suppression!r} "
+            f"source_text_hash={item.source_text_hash} "
+            f"truncated={str(truncated).lower()} "
+            f"text={json.dumps(cue_text, ensure_ascii=False)}"
         )
 
 

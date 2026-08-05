@@ -769,10 +769,31 @@ declared roll-up prefix; an untimed terminal cue can close the same exact
 three-cue bridge. All three timing boundaries must be contiguous within the
 same tolerance. Without that evidence the short cue remains speech.
 A bounded 50-millisecond tolerance covers provider boundary quantization but
-does not turn materially separated cues into deduplication candidates. The
-payload records the cue count and number of removed overlap words. The
-immutable raw artifact remains the authority for timing, layout, and
-independent reproduction of the transformation.
+does not turn materially separated cues into deduplication candidates.
+
+Normalization version 6 adds a cue-level provenance map to the immutable
+`TRANSCRIPT` payload. Every parsed cue records its canonical source-block
+index and SHA-256 digest, start and end milliseconds, normalized cue text,
+removed overlap counts, suppression reason and the exact character range it
+contributed to the continuous analytical text. Technical relay and complete
+overlap cues remain in the map with no fabricated output range. Character
+spaces inserted between contributions are not assigned a false source span.
+The map deliberately does not claim word-level timing when the provider only
+supports cue-level timing.
+
+`inspect-transcript-timeline` fails closed unless the selected transcript,
+acquisition and raw artifact form a valid provenance chain. It rereads the
+content-addressed raw bytes, verifies their digest and size, repeats the
+documented UTF-8/BOM and newline canonicalization, recomputes every referenced
+source-block digest, validates monotonic output ranges, and reconstructs the
+complete normalized text from cue contributions. It then exposes durations,
+gaps relative to the preceding contributing cue, suppressed transport cues
+and exact normalized offsets. The command is diagnostic only: a pause or cue
+boundary is not an event or topic boundary. The full map is validated before
+the bounded `--start-cue`/`--limit` display window is selected. The immutable
+raw artifact remains
+the authority for exact markup and independent reproduction of the
+transformation.
 
 The first provider adapter applies the same contract to YouTube caption
 tracks. `youtube-transcript-tracks` uses pinned `yt-dlp` metadata to list exact

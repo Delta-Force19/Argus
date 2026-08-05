@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from html import unescape
+import hashlib
 from pathlib import Path
 import re
 
@@ -18,7 +19,11 @@ from argus.storage.raw_artifact_repository import RawArtifactRepository
 from argus.storage.transcript_acquisition_repository import (
     TranscriptAcquisitionRepository,
 )
-from argus.transcripts import TranscriptFormat, TranscriptKind
+from argus.transcripts import (
+    TranscriptFormat,
+    TranscriptKind,
+    canonicalize_transcript_source,
+)
 
 
 _TIMING_LINE = re.compile(
@@ -37,6 +42,9 @@ _TECHNICAL_RELAY_MAX_DURATION_MS = 50
 
 @dataclass(frozen=True, slots=True)
 class _CaptionCue:
+    cue_index: int
+    source_block_index: int
+    source_text_hash: str
     start_ms: int
     end_ms: int
     text: str
@@ -74,8 +82,8 @@ class TranscriptIngestionService:
     """
 
     METHOD = "deterministic-transcript-normalization"
-    METHOD_VERSION = "5"
-    SCHEMA_VERSION = "1"
+    METHOD_VERSION = "6"
+    SCHEMA_VERSION = "2"
 
     def __init__(
             self,
@@ -252,13 +260,7 @@ def _normalize_transcript(
         content: bytes,
         transcript_format: TranscriptFormat,
 ) -> _NormalizedTranscript:
-    if not content:
-        raise ValueError("Transcript content must not be empty.")
-    try:
-        decoded = content.decode("utf-8-sig")
-    except UnicodeDecodeError as error:
-        raise ValueError("Transcript content must be UTF-8 encoded.") from error
-    decoded = decoded.replace("\r\n", "\n").replace("\r", "\n")
+    decoded = canonicalize_transcript_source(content)
     if transcript_format is TranscriptFormat.PLAIN_TEXT:
         text = decoded.strip()
         limitations = (
@@ -268,18 +270,24 @@ def _normalize_transcript(
             "strategy": "plain-text-trim",
         }
     else:
-        text, cue_count, removed_overlap_word_count = _caption_text(
+        (
+            text,
+            cue_count,
+            removed_overlap_word_count,
+            cue_provenance,
+        ) = _caption_text(
             decoded, transcript_format
         )
         limitations = (
-            "Cue timing and technical cue boundaries are preserved only in "
-            "the immutable raw artifact; the normalized analytical text "
-            "omits them.",
+            "Cue timing is preserved at cue-level resolution in normalized "
+            "provenance; exact technical cue markup remains only in the "
+            "immutable raw artifact.",
         )
         metadata = {
             "strategy": "timing-aware-caption-rollup",
             "cue_count": cue_count,
             "removed_overlap_word_count": removed_overlap_word_count,
+            "cue_provenance": cue_provenance,
         }
     if not text:
         raise ValueError("Transcript normalization produced no text.")
@@ -293,7 +301,7 @@ def _normalize_transcript(
 def _caption_text(
         text: str,
         transcript_format: TranscriptFormat,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, dict[str, object]]:
     blocks = re.split(r"\n[ \t]*\n", text.strip())
     cues: list[_CaptionCue] = []
     for index, block in enumerate(blocks):
@@ -328,6 +336,11 @@ def _caption_text(
             if timing_match is None:
                 raise RuntimeError("Caption timing match was not retained.")
             cues.append(_CaptionCue(
+                cue_index=len(cues) + 1,
+                source_block_index=index + 1,
+                source_text_hash=hashlib.sha256(
+                    block.encode("utf-8")
+                ).hexdigest(),
                 start_ms=_timestamp_ms(timing_match.group(1)),
                 end_ms=_timestamp_ms(timing_match.group(2)),
                 text=cue,
@@ -340,6 +353,8 @@ def _caption_text(
     removed_overlap_word_count = 0
     previous: _CaptionCue | None = None
     relay_overlap_word_count: int | None = None
+    cue_records: list[dict[str, object]] = []
+    output_character_count = 0
     for cue_index, cue in enumerate(cues):
         removed_overlap_word_count += (
             cue.removed_internal_overlap_word_count
@@ -348,6 +363,13 @@ def _caption_text(
         if _is_technical_relay_cue(cues, cue_index):
             removed_overlap_word_count += len(cue_words)
             relay_overlap_word_count = len(cue_words)
+            cue_records.append(_cue_provenance_record(
+                cue,
+                output_start_char=None,
+                output_end_char=None,
+                removed_prefix_word_count=len(cue_words),
+                suppression_reason="technical_relay",
+            ))
             previous = cue
             continue
         overlap = 0
@@ -369,10 +391,71 @@ def _caption_text(
                     and overlap != len(overlap_candidate)
             ):
                 overlap = 0
-        words.extend(cue_words[overlap:])
+        emitted_words = cue_words[overlap:]
+        output_start_char = None
+        output_end_char = None
+        suppression_reason = None
+        if emitted_words:
+            emitted_text = " ".join(emitted_words)
+            output_start_char = output_character_count + (1 if words else 0)
+            output_end_char = output_start_char + len(emitted_text)
+            output_character_count = output_end_char
+            words.extend(emitted_words)
+        else:
+            suppression_reason = "exact_overlap"
         removed_overlap_word_count += overlap
+        cue_records.append(_cue_provenance_record(
+            cue,
+            output_start_char=output_start_char,
+            output_end_char=output_end_char,
+            removed_prefix_word_count=overlap,
+            suppression_reason=suppression_reason,
+        ))
         previous = cue
-    return " ".join(words), len(cues), removed_overlap_word_count
+    normalized_text = " ".join(words)
+    if len(normalized_text) != output_character_count:
+        raise RuntimeError("Caption provenance offsets are inconsistent.")
+    cue_provenance: dict[str, object] = {
+        "schema_version": "1",
+        "time_unit": "milliseconds",
+        "source_locator": "canonical_caption_block_index",
+        "source_canonicalization": "utf8_sig_decode_and_lf_newlines",
+        "normalized_text_hash": hashlib.sha256(
+            normalized_text.encode("utf-8")
+        ).hexdigest(),
+        "cues": cue_records,
+    }
+    return (
+        normalized_text,
+        len(cues),
+        removed_overlap_word_count,
+        cue_provenance,
+    )
+
+
+def _cue_provenance_record(
+        cue: _CaptionCue,
+        *,
+        output_start_char: int | None,
+        output_end_char: int | None,
+        removed_prefix_word_count: int,
+        suppression_reason: str | None,
+) -> dict[str, object]:
+    return {
+        "cue_index": cue.cue_index,
+        "source_block_index": cue.source_block_index,
+        "source_text_hash": cue.source_text_hash,
+        "start_ms": cue.start_ms,
+        "end_ms": cue.end_ms,
+        "normalized_cue_text": cue.text,
+        "output_start_char": output_start_char,
+        "output_end_char": output_end_char,
+        "removed_prefix_word_count": removed_prefix_word_count,
+        "removed_internal_overlap_word_count": (
+            cue.removed_internal_overlap_word_count
+        ),
+        "suppression_reason": suppression_reason,
+    }
 
 
 def _is_technical_relay_cue(

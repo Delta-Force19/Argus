@@ -1,6 +1,18 @@
 from enum import Enum
 
 
+def canonicalize_transcript_source(content: bytes) -> str:
+    """Decode exact UTF-8 bytes and canonicalize only newline serialization."""
+
+    if not content:
+        raise ValueError("Transcript content must not be empty.")
+    try:
+        decoded = content.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError("Transcript content must be UTF-8 encoded.") from error
+    return decoded.replace("\r\n", "\n").replace("\r", "\n")
+
+
 class TranscriptFormat(str, Enum):
     """Serialized form of retrieved transcript bytes."""
 

@@ -14,6 +14,10 @@ from argus.services.event_text_readiness_service import (
     EventTextReadiness,
     EventTextReadinessStatus,
 )
+from argus.services.transcript_timeline_service import (
+    TranscriptCueTimelineItem,
+    TranscriptTimelineReport,
+)
 
 
 READY = EventTextReadiness(
@@ -112,6 +116,123 @@ class EventFragmentSegmentationCliTests(unittest.TestCase):
         self.assertIn("fragments=1 persisted=false", result.output)
         self.assertIn("event_fragment_id=none", result.output)
         self.assertIn("event_assignments=0", result.output)
+
+    @patch("argus.interface.cli.inspect_transcript_timeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_transcript_timeline_prints_offsets_timing_and_suppression(
+            self,
+            upgrade_database,
+            configure_logging,
+            inspect_transcript_timeline,
+    ) -> None:
+        inspect_transcript_timeline.return_value = TranscriptTimelineReport(
+            document_version_id=34,
+            transcript_artifact_id=910,
+            transcript_acquisition_id=6,
+            raw_artifact_id=227,
+            character_count=9,
+            text_hash="a" * 64,
+            cue_provenance_schema_version="1",
+            time_unit="milliseconds",
+            items=(
+                TranscriptCueTimelineItem(
+                    cue_index=1,
+                    source_block_index=2,
+                    source_text_hash="b" * 64,
+                    start_ms=0,
+                    end_ms=1000,
+                    gap_before_ms=None,
+                    normalized_cue_text="One.",
+                    output_start_char=0,
+                    output_end_char=4,
+                    output_text="One.",
+                    removed_prefix_word_count=0,
+                    removed_internal_overlap_word_count=0,
+                    suppression_reason=None,
+                ),
+                TranscriptCueTimelineItem(
+                    cue_index=2,
+                    source_block_index=3,
+                    source_text_hash="c" * 64,
+                    start_ms=1000,
+                    end_ms=1010,
+                    gap_before_ms=None,
+                    normalized_cue_text="One.",
+                    output_start_char=None,
+                    output_end_char=None,
+                    output_text="",
+                    removed_prefix_word_count=1,
+                    removed_internal_overlap_word_count=0,
+                    suppression_reason="technical_relay",
+                ),
+            ),
+        )
+
+        result = CliRunner().invoke(app, [
+            "inspect-transcript-timeline",
+            "--document-version-id", "34",
+            "--text-artifact-id", "910",
+        ])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        inspect_transcript_timeline.assert_called_once_with(
+            document_version_id=34,
+            transcript_artifact_id=910,
+        )
+        self.assertIn("contributing_cues=1 suppressed_cues=1", result.output)
+        self.assertIn("shown_cues=2 shown_range=1:2", result.output)
+        self.assertIn("time_ms=0:1000", result.output)
+        self.assertIn("output_span=0:4", result.output)
+        self.assertIn("suppression='technical_relay'", result.output)
+
+    @patch("argus.interface.cli.inspect_transcript_timeline")
+    @patch("argus.interface.cli.configure_logging")
+    @patch("argus.interface.cli.upgrade_database")
+    def test_transcript_timeline_rejects_start_beyond_available_cues(
+            self,
+            upgrade_database,
+            configure_logging,
+            inspect_transcript_timeline,
+    ) -> None:
+        inspect_transcript_timeline.return_value = TranscriptTimelineReport(
+            document_version_id=34,
+            transcript_artifact_id=910,
+            transcript_acquisition_id=6,
+            raw_artifact_id=227,
+            character_count=4,
+            text_hash="a" * 64,
+            cue_provenance_schema_version="1",
+            time_unit="milliseconds",
+            items=(
+                TranscriptCueTimelineItem(
+                    cue_index=1,
+                    source_block_index=2,
+                    source_text_hash="b" * 64,
+                    start_ms=0,
+                    end_ms=1000,
+                    gap_before_ms=None,
+                    normalized_cue_text="One.",
+                    output_start_char=0,
+                    output_end_char=4,
+                    output_text="One.",
+                    removed_prefix_word_count=0,
+                    removed_internal_overlap_word_count=0,
+                    suppression_reason=None,
+                ),
+            ),
+        )
+
+        result = CliRunner().invoke(app, [
+            "inspect-transcript-timeline",
+            "--document-version-id", "34",
+            "--text-artifact-id", "910",
+            "--start-cue", "2",
+        ])
+
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("exceeds the available cue count: 1", result.output)
+        self.assertNotIn("Traceback", result.output)
 
     @patch("argus.interface.cli.segment_event_fragments")
     @patch("argus.interface.cli.configure_logging")

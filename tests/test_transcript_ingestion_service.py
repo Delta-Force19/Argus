@@ -87,15 +87,30 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["text"], "First story. Second story."
         )
-        self.assertEqual(artifact.method_version, "5")
+        self.assertEqual(artifact.method_version, "6")
+        self.assertEqual(artifact.schema_version, "2")
+        normalization = artifact.payload["normalization"]
         self.assertEqual(
-            artifact.payload["normalization"],
-            {
-                "strategy": "timing-aware-caption-rollup",
-                "cue_count": 2,
-                "removed_overlap_word_count": 0,
-            },
+            normalization["strategy"], "timing-aware-caption-rollup"
         )
+        self.assertEqual(normalization["cue_count"], 2)
+        self.assertEqual(normalization["removed_overlap_word_count"], 0)
+        cue_provenance = normalization["cue_provenance"]
+        self.assertEqual(cue_provenance["schema_version"], "1")
+        self.assertEqual(cue_provenance["time_unit"], "milliseconds")
+        self.assertEqual(
+            cue_provenance["normalized_text_hash"],
+            hashlib.sha256(artifact.payload["text"].encode("utf-8")).hexdigest(),
+        )
+        first_cue, second_cue = cue_provenance["cues"]
+        self.assertEqual(first_cue["source_block_index"], 2)
+        self.assertEqual(first_cue["start_ms"], 0)
+        self.assertEqual(first_cue["end_ms"], 2000)
+        self.assertEqual(first_cue["output_start_char"], 0)
+        self.assertEqual(first_cue["output_end_char"], 12)
+        self.assertEqual(second_cue["source_block_index"], 3)
+        self.assertEqual(second_cue["output_start_char"], 13)
+        self.assertEqual(second_cue["output_end_char"], 26)
         self.assertEqual(
             artifact.payload["source"]["content_hash"],
             result.raw_content_hash,
@@ -245,6 +260,22 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
             artifact.payload["normalization"]["removed_overlap_word_count"],
             24,
         )
+        cue_records = artifact.payload["normalization"][
+            "cue_provenance"
+        ]["cues"]
+        self.assertEqual(
+            [item["suppression_reason"] for item in cue_records],
+            [None, "technical_relay", None, "technical_relay", None],
+        )
+        self.assertIsNone(cue_records[1]["output_start_char"])
+        contributing_text = " ".join(
+            artifact.payload["text"][
+                item["output_start_char"]:item["output_end_char"]
+            ]
+            for item in cue_records
+            if item["output_start_char"] is not None
+        )
+        self.assertEqual(contributing_text, artifact.payload["text"])
 
     def test_preserves_short_cue_without_three_cue_relay_evidence(self) -> None:
         content = (
