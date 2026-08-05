@@ -29,6 +29,7 @@ from argus.knowledge import (
     CandidateResolutionStatus,
     EntityType,
 )
+from argus.event_observations import EventObservationType
 
 from argus.processing import (
     ProcessingStage,
@@ -622,6 +623,93 @@ class EventFragmentCandidate(Base):
     quality_limitations: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, nullable=False
+    )
+
+
+class EventObservationCandidate(Base):
+    """One source-located model signal; never a real-world event fact."""
+
+    __tablename__ = "event_observation_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "start_char >= 0",
+            name="ck_event_observation_candidates_start_non_negative",
+        ),
+        CheckConstraint(
+            "end_char > start_char",
+            name="ck_event_observation_candidates_end_after_start",
+        ),
+        UniqueConstraint(
+            "derived_artifact_id",
+            "event_fragment_candidate_id",
+            "observation_type",
+            "start_char",
+            "end_char",
+            "source_label",
+            name="uq_event_observation_candidate_origin",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    derived_artifact_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "derived_artifacts.id",
+            name=(
+                "fk_event_observation_candidates_derived_artifact_id_"
+                "derived_artifacts"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    event_fragment_candidate_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "event_fragment_candidates.id",
+            name=(
+                "fk_event_observation_candidates_fragment_id_"
+                "event_fragment_candidates"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    document_version_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "document_versions.id",
+            name=(
+                "fk_event_observation_candidates_document_version_id_"
+                "document_versions"
+            ),
+        ),
+        nullable=False,
+        index=True,
+    )
+    observation_type: Mapped[EventObservationType] = mapped_column(
+        SQLAlchemyEnum(
+            EventObservationType,
+            name="event_observation_type",
+            native_enum=False,
+            values_callable=lambda enum_type: [
+                member.value for member in enum_type
+            ],
+            validate_strings=True,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    source_label: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )
+    surface_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_value: Mapped[str] = mapped_column(
+        Text, nullable=False, index=True
+    )
+    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, nullable=False
     )

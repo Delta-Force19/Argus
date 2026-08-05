@@ -739,6 +739,17 @@ source-anchored candidates through the existing idempotent fragment service;
 it never creates an event or assignment. Ambiguous text artifacts and damaged
 text or cue-provenance payloads fail closed.
 
+`extract-event-observations` is the next source-level boundary. It requires one
+persisted fragment method and version, then runs one exact versioned linguistic
+model against each fragment. Named entities become possible participant,
+place, time or named-event mentions; dependency parsing proposes lexical
+actions and grammatical objects. Absolute source offsets and fragment
+identifiers are validated before an immutable `EVENT_OBSERVATIONS` artifact
+and its queryable projection can be persisted. Preview is read-only. Multiple
+fragment methods are rejected as ambiguous unless the operator selects one
+explicitly. No relation between observations and no real-world event identity
+is inferred.
+
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from
 event comparison and fragment persistence until a source-anchored transcript

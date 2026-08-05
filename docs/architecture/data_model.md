@@ -227,6 +227,28 @@ Important properties:
 - method version;
 - timestamp.
 
+### Event Observation Candidate
+
+An `EventObservationCandidate` is a source-located model signal extracted from
+one persisted `EventFragmentCandidate`. It is not a real-world fact, claim,
+semantic role or event assignment.
+
+Each candidate records:
+
+- the immutable `EVENT_OBSERVATIONS` derived artifact;
+- the exact fragment candidate;
+- one narrow type: participant mention, place mention, time mention, named
+  event mention, action candidate or object candidate;
+- absolute half-open character offsets and exact surface text;
+- a normalized value and original model/dependency label;
+- a method rationale.
+
+The parent artifact stores the selected text artifact and hash, complete
+fragment set and hashes, extraction method and model version, ordered output,
+and quality limitations. Queryable rows are an idempotent projection of that
+payload. A named entity merely proposes a possible role; a grammatical verb or
+object does not establish a factual subject-predicate-object relationship.
+
 ### Entity Mention
 
 An `EntityMention` is a model observation that a text span appears to refer to

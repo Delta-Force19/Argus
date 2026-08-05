@@ -76,6 +76,32 @@ document was completely or correctly segmented. A first-class
 `SegmentationRun`, richer boundary evidence and calibrated evaluation remain
 planned.
 
+## Implemented observation extraction
+
+`extract-event-observations` consumes one explicit persisted fragment set and
+analyzes each exact source span independently. The first method,
+`spacy-event-observations`, records six narrow signal types:
+
+- named-entity mentions that may indicate a participant, place, time or named
+  event;
+- non-auxiliary verbal tokens as action candidates;
+- dependency-labeled complements as grammatical object candidates.
+
+Every observation retains its absolute half-open offsets, surface text,
+normalized value, original model or dependency label, rationale, fragment
+identifier, model package version and explicit limitations. The complete run
+is an immutable `EVENT_OBSERVATIONS` derived artifact; relational
+`EventObservationCandidate` rows are a queryable projection of that payload.
+Preview is read-only and persistence is explicit and idempotent.
+
+These signals do not establish semantic roles or factual relations. In
+particular, a person mentioned in a fragment is not automatically an event
+participant, a location mention is not automatically the event location, and
+a grammatical subject or object does not prove who acted on what. The method
+does not resolve coreference or create subject-predicate-object triples. It
+creates no `Event`, claim, cluster or assignment. Those decisions require
+cross-source evidence and later calibrated reconstruction.
+
 ## Event-content readiness
 
 Event analysis must distinguish source content from page metadata. Text

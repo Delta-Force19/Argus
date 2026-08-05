@@ -111,6 +111,10 @@ from argus.services.event_fragment_segmentation_service import (
     inspect_document_text,
     segment_event_fragments,
 )
+from argus.services.event_observation_extraction_service import (
+    extract_event_observations,
+)
+from argus.event_observations import EventObservationType
 from argus.services.transcript_ingestion_service import ingest_transcript_file
 from argus.services.transcript_timeline_service import (
     inspect_transcript_timeline,
@@ -1954,6 +1958,82 @@ def segment_event_fragments_command(
         )
         for limitation in item.quality_limitations:
             typer.echo(f"fragment={index} limitation={limitation!r}")
+
+
+@app.command("extract-event-observations")
+def extract_event_observations_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose fragments will be analyzed.",
+        ),
+        text_artifact_id: int | None = typer.Option(
+            None,
+            "--text-artifact-id",
+            min=1,
+            help="Exact source text artifact when the version has several.",
+        ),
+        fragment_method: str | None = typer.Option(
+            None,
+            "--fragment-method",
+            help="Exact fragment method when alternative candidates exist.",
+        ),
+        fragment_method_version: str | None = typer.Option(
+            None,
+            "--fragment-method-version",
+            help="Exact fragment method version; supply with its method.",
+        ),
+        persist: bool = typer.Option(
+            False,
+            "--persist",
+            help="Persist candidate observations; never create an Event.",
+        ),
+) -> None:
+    """Preview or persist source-located event observation candidates."""
+
+    try:
+        report = extract_event_observations(
+            document_version_id=document_version_id,
+            text_derived_artifact_id=text_artifact_id,
+            fragment_method=fragment_method,
+            fragment_method_version=fragment_method_version,
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    counts = " ".join(
+        f"{observation_type.value}={report.count(observation_type)}"
+        for observation_type in EventObservationType
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"text_artifact_id={report.text_derived_artifact_id} "
+        "event_observation_artifact_id="
+        f"{report.event_observation_artifact_id if report.event_observation_artifact_id is not None else 'none'} "
+        f"fragments={report.fragment_count} "
+        f"observations={report.observation_count} "
+        f"persisted={str(report.persisted).lower()} "
+        f"fragment_method={report.fragment_method!r} "
+        f"fragment_method_version={report.fragment_method_version!r} "
+        f"extraction_method={report.extraction_method!r} "
+        f"extraction_method_version={report.extraction_method_version!r} "
+        f"{counts} event_assignments=0"
+    )
+    for item in report.items:
+        typer.echo(
+            "event_observation_id="
+            f"{item.event_observation_id if item.event_observation_id is not None else 'none'} "
+            f"event_fragment_id={item.event_fragment_id} "
+            f"type={item.observation_type.value!r} "
+            f"span={item.start_char}:{item.end_char} "
+            f"source_label={item.source_label!r} "
+            f"value={item.normalized_value!r} "
+            f"text={json.dumps(item.surface_text, ensure_ascii=False)} "
+            f"rationale={item.rationale!r} event_assignment=none"
+        )
+    for limitation in report.quality_limitations:
+        typer.echo(f"limitation={limitation!r}")
 
 
 @app.command()

@@ -36,6 +36,7 @@ EXPECTED_TABLES = {
     "entity_candidates",
     "entity_mentions",
     "event_fragment_candidates",
+    "event_observation_candidates",
     "entity_resolution_evidence",
     "processing_states",
     "raw_artifacts",
@@ -90,6 +91,30 @@ class MigrationIntegrationTests(unittest.TestCase):
                 test_engine.dispose()
 
         self.assertEqual(table_names, EXPECTED_TABLES)
+
+    def test_event_observation_migration_downgrades_to_transcripts(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            database_path = (
+                Path(temporary_directory) / "event_observation_test.db"
+            )
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            config = Config(str(ALEMBIC_CONFIG_PATH))
+            with patch.dict(
+                os.environ,
+                {"ARGUS_ALEMBIC_DATABASE_URL": database_url},
+            ):
+                command.upgrade(config, "head")
+                command.downgrade(config, "c6d7e8f9a0b1")
+            test_engine = create_engine(database_url)
+            try:
+                table_names = set(inspect(test_engine).get_table_names())
+            finally:
+                test_engine.dispose()
+
+        self.assertNotIn("event_observation_candidates", table_names)
+        self.assertIn("transcript_acquisitions", table_names)
 
     def test_transcript_migration_downgrades_to_event_fragments(self) -> None:
         with TemporaryDirectory() as temporary_directory:
