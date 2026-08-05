@@ -32,6 +32,7 @@ _INLINE_TIMESTAMP = re.compile(
 _BCP47 = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 _MIN_PARTIAL_OVERLAP_WORDS = 2
 _ROLLING_BOUNDARY_TOLERANCE_MS = 50
+_TECHNICAL_RELAY_MAX_DURATION_MS = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +74,7 @@ class TranscriptIngestionService:
     """
 
     METHOD = "deterministic-transcript-normalization"
-    METHOD_VERSION = "4"
+    METHOD_VERSION = "5"
     SCHEMA_VERSION = "1"
 
     def __init__(
@@ -338,13 +339,27 @@ def _caption_text(
     words: list[str] = []
     removed_overlap_word_count = 0
     previous: _CaptionCue | None = None
-    for cue in cues:
+    relay_overlap_word_count: int | None = None
+    for cue_index, cue in enumerate(cues):
         removed_overlap_word_count += (
             cue.removed_internal_overlap_word_count
         )
         cue_words = cue.text.split()
+        if _is_technical_relay_cue(cues, cue_index):
+            removed_overlap_word_count += len(cue_words)
+            relay_overlap_word_count = len(cue_words)
+            previous = cue
+            continue
         overlap = 0
-        if previous is not None and _may_roll_up(previous, cue):
+        if relay_overlap_word_count is not None:
+            overlap_candidate = cue_words[:relay_overlap_word_count]
+            overlap = _exact_word_overlap(words, overlap_candidate)
+            if overlap != relay_overlap_word_count:
+                raise RuntimeError(
+                    "Technical caption relay lost its exact successor."
+                )
+            relay_overlap_word_count = None
+        elif previous is not None and _may_roll_up(previous, cue):
             overlap_candidate = cue_words
             if cue.rollup_prefix_word_count is not None:
                 overlap_candidate = cue_words[:cue.rollup_prefix_word_count]
@@ -358,6 +373,43 @@ def _caption_text(
         removed_overlap_word_count += overlap
         previous = cue
     return " ".join(words), len(cues), removed_overlap_word_count
+
+
+def _is_technical_relay_cue(
+        cues: Sequence[_CaptionCue],
+        cue_index: int,
+) -> bool:
+    if cue_index == 0 or cue_index + 1 >= len(cues):
+        return False
+    relay = cues[cue_index]
+    if (
+            relay.rollup_prefix_word_count is not None
+            or relay.end_ms - relay.start_ms
+            > _TECHNICAL_RELAY_MAX_DURATION_MS
+    ):
+        return False
+    previous = cues[cue_index - 1]
+    incoming = cues[cue_index + 1]
+    if (
+            abs(relay.start_ms - previous.end_ms)
+            > _ROLLING_BOUNDARY_TOLERANCE_MS
+            or abs(incoming.start_ms - relay.end_ms)
+            > _ROLLING_BOUNDARY_TOLERANCE_MS
+    ):
+        return False
+    relay_words = relay.text.split()
+    previous_words = previous.text.split()
+    incoming_words = incoming.text.split()
+    incoming_prefix = incoming_words
+    if incoming.rollup_prefix_word_count is not None:
+        incoming_prefix = incoming_words[:incoming.rollup_prefix_word_count]
+    return (
+        bool(relay_words)
+        and len(relay_words) <= len(previous_words)
+        and previous_words[-len(relay_words):] == relay_words
+        and len(relay_words) <= len(incoming_prefix)
+        and incoming_prefix[:len(relay_words)] == relay_words
+    )
 
 
 def _may_roll_up(previous: _CaptionCue, incoming: _CaptionCue) -> bool:

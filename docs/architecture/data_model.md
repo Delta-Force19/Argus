@@ -159,11 +159,17 @@ that touches the previous boundary within 50 milliseconds is eligible only
 when inline word timing marks its repeated roll-up prefix; only that prefix can
 be removed, while newly timed words remain intact. The normalization metadata
 also covers exact duplicate pre-timestamp display-line states inside a YouTube
-rolling cue. Lines without inline timing are preserved even when equal. This
-keeps transport duplication separate from genuine repeated speech. Metadata
-records both cue and removal counts. Publisher captions, human-created captions
-and automatically generated captions remain distinguishable; Argus does not treat
-their reliability as equal or silently relabel one kind as another.
+rolling cue. An untimed cue of at most 50 milliseconds is treated as a
+technical relay only when its entire text exactly bridges the preceding cue's
+suffix and the following cue's prefix at contiguous boundaries. Inline timing,
+when present, bounds the eligible following prefix; the same exact bridge may
+terminate in an untimed final cue. Untimed lines without this three-cue
+evidence are preserved even when equal. This keeps transport duplication
+separate from genuine repeated speech. Metadata records both cue and removal
+counts. Publisher captions,
+human-created captions and automatically generated captions remain
+distinguishable; Argus does not treat their reliability as equal or silently
+relabel one kind as another.
 
 Importing provider output does not prove that the transcript is complete or
 accurate and does not create an event. A transcript can make video content

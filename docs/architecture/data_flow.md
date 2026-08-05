@@ -760,7 +760,14 @@ A YouTube rolling cue may serialize its current display line twice: once as a
 plain visual line and again immediately before the first inline word timestamp.
 Normalization collapses exact word overlap between those pre-timestamp line
 states before comparing the cue with its predecessor. Untimed visual lines are
-not deduplicated, so ordinary repeated subtitle text remains representable.
+not deduplicated merely because their text is equal, so ordinary repeated
+subtitle text remains representable. YouTube may also insert a short untimed
+relay cue between two rolling cues. It is discarded only when its complete
+text is both an exact suffix of the preceding cue and an exact prefix of the
+following cue. When inline timing exists, the match is restricted to its
+declared roll-up prefix; an untimed terminal cue can close the same exact
+three-cue bridge. All three timing boundaries must be contiguous within the
+same tolerance. Without that evidence the short cue remains speech.
 A bounded 50-millisecond tolerance covers provider boundary quantization but
 does not turn materially separated cues into deduplication candidates. The
 payload records the cue count and number of removed overlap words. The

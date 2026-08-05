@@ -87,7 +87,7 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["text"], "First story. Second story."
         )
-        self.assertEqual(artifact.method_version, "4")
+        self.assertEqual(artifact.method_version, "5")
         self.assertEqual(
             artifact.payload["normalization"],
             {
@@ -204,6 +204,98 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["normalization"]["removed_overlap_word_count"],
             17,
+        )
+
+    def test_collapses_youtube_short_relay_cues(self) -> None:
+        content = (
+            b"WEBVTT\nKind: captions\nLanguage: en\n\n"
+            b"00:00:00.400 --> 00:00:03.030 align:start position:0%\n"
+            b"At<00:00:00.560><c> least</c><00:00:01.040><c> 25</c>"
+            b"<00:00:01.680><c> people</c><00:00:02.080><c> were</c>"
+            b"<00:00:02.399><c> killed</c><00:00:02.800><c> by</c>\n\n"
+            b"00:00:03.030 --> 00:00:03.040 align:start position:0%\n"
+            b"At least 25 people were killed by\n\n"
+            b"00:00:03.040 --> 00:00:05.030 align:start position:0%\n"
+            b"At least 25 people were killed by\n"
+            b"Israeli<00:00:03.600><c> air</c><00:00:03.840><c> strikes</c>"
+            b"<00:00:04.240><c> and</c><00:00:04.480><c> gunshots</c>\n\n"
+            b"00:00:05.030 --> 00:00:05.040 align:start position:0%\n"
+            b"Israeli air strikes and gunshots\n\n"
+            b"00:00:05.040 --> 00:00:07.430 align:start position:0%\n"
+            b"Israeli air strikes and gunshots\n"
+            b"overnight,<00:00:05.759><c> according</c><00:00:06.160>"
+            b"<c> to</c><00:00:06.480><c> health</c><00:00:06.799>"
+            b"<c> officials</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "At least 25 people were killed by Israeli air strikes and "
+            "gunshots overnight, according to health officials",
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["cue_count"], 5
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            24,
+        )
+
+    def test_preserves_short_cue_without_three_cue_relay_evidence(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:01.000\nNever again.\n\n"
+            b"00:00:01.000 --> 00:00:01.010\nNever again.\n\n"
+            b"00:00:01.010 --> 00:00:02.000\n"
+            b"<00:00:01.010><c>Never again.</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "Never again. Never again. Never again.",
+        )
+
+    def test_collapses_youtube_relay_before_untimed_final_cue(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:18.800 --> 00:00:21.429 align:start position:0%\n"
+            b"hospital, most of the victims were\n"
+            b"killed<00:00:19.119><c> by</c><00:00:19.439><c> gunfire</c>"
+            b"<00:00:20.160><c> as</c><00:00:20.400><c> they</c>"
+            b"<00:00:20.640><c> waited</c><00:00:20.960><c> for</c>"
+            b"<00:00:21.119><c> aid</c>\n\n"
+            b"00:00:21.429 --> 00:00:21.439 align:start position:0%\n"
+            b"killed by gunfire as they waited for aid\n\n"
+            b"00:00:21.439 --> 00:00:23.429 align:start position:0%\n"
+            b"killed by gunfire as they waited for aid\n"
+            b"trucks<00:00:21.840><c> close</c><00:00:22.080><c> to</c>"
+            b"<00:00:22.320><c> Zikim</c><00:00:22.880><c> crossing</c>"
+            b"<00:00:23.279><c> with</c>\n\n"
+            b"00:00:23.429 --> 00:00:23.439 align:start position:0%\n"
+            b"trucks close to Zikim crossing with\n\n"
+            b"00:00:23.439 --> 00:00:42.630 align:start position:0%\n"
+            b"trucks close to Zikim crossing with\nIsrael.\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "hospital, most of the victims were killed by gunfire as they "
+            "waited for aid trucks close to Zikim crossing with Israel.",
         )
 
     def test_preserves_untimed_repeated_visual_lines(self) -> None:
