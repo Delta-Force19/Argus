@@ -760,6 +760,16 @@ conservation check rejects any profile that loses or double-counts a raw
 observation. Optional persistence creates an immutable
 `EVENT_FRAGMENT_PROFILES` artifact; it creates no event or assignment.
 
+`compare-event-fragments` consumes one exact profile artifact and enumerates
+every unordered pair. Exact shared normalized values are compared only within
+the same observation type and retain the observation identifiers from both
+sides. A deterministic rule labels multi-type overlap containing a core
+participant, place, time or named-event dimension as `candidate`; narrower
+overlap is `weak`, and no overlap is `insufficient`. All three labels are
+review priorities rather than event-identity decisions. Optional persistence
+creates an immutable `EVENT_FRAGMENT_PAIR_CANDIDATES` artifact bound to the
+profile artifact and hash; it creates no `Event`, cluster or assignment.
+
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from
 event comparison and fragment persistence until a source-anchored transcript

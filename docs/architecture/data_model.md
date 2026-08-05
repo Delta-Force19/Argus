@@ -264,6 +264,20 @@ artifact identifier and parent content hash make the reduction reproducible.
 The artifact is intended for later similarity features; it is not an `Event`,
 semantic-role graph, claim or factual assertion.
 
+### Event Fragment Pair Candidate Artifact
+
+An `EVENT_FRAGMENT_PAIR_CANDIDATES` derived artifact stores an exhaustive
+unordered comparison of the profiles in one exact
+`EVENT_FRAGMENT_PROFILES` artifact. Each pair contains its two fragment
+identifiers, status, evidence dimensions, heuristic evidence points, rationale
+and all exact shared signals with source observation identifiers from both
+profiles. The payload records the parent artifact identifier and content hash.
+
+`candidate`, `weak` and `insufficient` describe the amount of retained textual
+overlap under one versioned rule. They are not probabilities, negative
+evidence, event identities, cluster membership or assignments. No relational
+event row is created at this stage.
+
 ### Entity Mention
 
 An `EntityMention` is a model observation that a text span appears to refer to

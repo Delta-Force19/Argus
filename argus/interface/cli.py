@@ -119,6 +119,10 @@ from argus.event_fragment_profiles import ProfileExclusionReason
 from argus.services.event_fragment_profile_service import (
     profile_event_fragments,
 )
+from argus.event_fragment_pair_candidates import FragmentPairStatus
+from argus.services.event_fragment_pair_candidate_service import (
+    compare_event_fragment_profiles,
+)
 from argus.services.transcript_ingestion_service import ingest_transcript_file
 from argus.services.transcript_timeline_service import (
     inspect_transcript_timeline,
@@ -2129,6 +2133,88 @@ def profile_event_fragments_command(
                     f"value={item.normalized_value!r} "
                     f"reason={item.reason.value!r} "
                     f"rationale={item.rationale!r}"
+                )
+    for limitation in report.quality_limitations:
+        typer.echo(f"limitation={limitation!r}")
+
+
+@app.command("compare-event-fragments")
+def compare_event_fragments_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose fragment profiles are compared.",
+        ),
+        event_fragment_profile_artifact_id: int | None = typer.Option(
+            None,
+            "--event-fragment-profile-artifact-id",
+            min=1,
+            help="Exact profile artifact when the version has several.",
+        ),
+        persist: bool = typer.Option(
+            False,
+            "--persist",
+            help="Persist the complete pair audit as a derived artifact.",
+        ),
+        show_matches: bool = typer.Option(
+            False,
+            "--show-matches",
+            help="Print every exact signal shared by a fragment pair.",
+        ),
+) -> None:
+    """Prioritize fragment pairs for review without assigning events."""
+
+    try:
+        report = compare_event_fragment_profiles(
+            document_version_id=document_version_id,
+            event_fragment_profile_artifact_id=(
+                event_fragment_profile_artifact_id
+            ),
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    counts = " ".join(
+        f"{status.value}={report.status_count(status)}"
+        for status in FragmentPairStatus
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        "event_fragment_profile_artifact_id="
+        f"{report.event_fragment_profile_artifact_id} "
+        "fragment_pair_candidate_artifact_id="
+        f"{report.fragment_pair_candidate_artifact_id if report.fragment_pair_candidate_artifact_id is not None else 'none'} "
+        f"pairs={len(report.pairs)} {counts} "
+        f"persisted={str(report.persisted).lower()} "
+        f"method={report.method!r} method_version={report.method_version!r} "
+        "event_assignments=0"
+    )
+    for pair in report.pairs:
+        dimensions = ",".join(
+            item.value for item in pair.evidence_dimensions
+        ) or "none"
+        typer.echo(
+            f"left_event_fragment_id={pair.left_event_fragment_id} "
+            f"right_event_fragment_id={pair.right_event_fragment_id} "
+            f"status={pair.status.value!r} matches={len(pair.matches)} "
+            f"dimensions={dimensions!r} "
+            f"evidence_points={pair.evidence_points} "
+            f"rationale={pair.rationale!r} event_assignment=none"
+        )
+        if show_matches:
+            for match in pair.matches:
+                typer.echo(
+                    f"left_event_fragment_id={pair.left_event_fragment_id} "
+                    f"right_event_fragment_id={pair.right_event_fragment_id} "
+                    f"type={match.observation_type.value!r} "
+                    f"value={match.normalized_value!r} "
+                    "left_observation_ids="
+                    f"{','.join(map(str, match.left_observation_ids))} "
+                    "right_observation_ids="
+                    f"{','.join(map(str, match.right_observation_ids))} "
+                    f"evidence_points={match.evidence_points} "
+                    f"rationale={match.rationale!r}"
                 )
     for limitation in report.quality_limitations:
         typer.echo(f"limitation={limitation!r}")

@@ -129,6 +129,27 @@ filters can omit meaningful context, exact normalization does not resolve
 aliases, retained mentions have no proven semantic role, and no cross-source
 identity or event assignment is created.
 
+## Implemented fragment-pair candidates
+
+`compare-event-fragments` consumes one exact immutable
+`EVENT_FRAGMENT_PROFILES` artifact and audits every unordered fragment pair.
+For each pair it records every exact shared type/value signal, both sets of
+source observation identifiers, the evidence type and an explicit heuristic
+point value. Missing overlap is recorded as `insufficient`; it is not treated
+as evidence that two fragments describe different events.
+
+The version 1 candidate rule requires shared values in at least two distinct
+observation types, including at least one participant, place, time or named
+event mention. Pairs satisfying that rule are `candidate`; narrower overlap is
+`weak`. The labels prioritize later review only. They are not probabilities,
+clusters, links, same-event decisions or factual assertions. Exact matching
+also misses aliases and paraphrases and can overstate recurring topic terms.
+
+Preview is read-only. `--persist` stores the complete pair audit as an
+immutable `EVENT_FRAGMENT_PAIR_CANDIDATES` artifact bound to the parent
+artifact identifier and content hash. `--show-matches` exposes the
+source-level evidence behind each status.
+
 ## Event-content readiness
 
 Event analysis must distinguish source content from page metadata. Text

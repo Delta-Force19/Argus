@@ -31,6 +31,8 @@ Argus is under active development. The current codebase includes:
   persisted event fragments;
 - deterministic fragment profiles that group retained observations and record
   every exclusion reason. These remain text measurements, not event facts.
+- exhaustive fragment-pair audits that expose exact shared profile signals and
+  prioritize multi-type candidates without creating event assignments.
 
 Event reconstruction, claim extraction, fact verification, narrative
 detection, and calibrated event clustering are not implemented yet. Their
@@ -95,6 +97,7 @@ python main.py inspect-transcript-timeline --help
 python main.py segment-event-fragments --document-version-id 34
 python main.py extract-event-observations --document-version-id 34
 python main.py profile-event-fragments --document-version-id 34
+python main.py compare-event-fragments --document-version-id 34 --help
 ```
 
 Use `python main.py --help` as the authoritative command inventory; analytical
