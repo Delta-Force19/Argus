@@ -40,6 +40,7 @@ class _CaptionCue:
     end_ms: int
     text: str
     rollup_prefix_word_count: int | None
+    removed_internal_overlap_word_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +73,7 @@ class TranscriptIngestionService:
     """
 
     METHOD = "deterministic-transcript-normalization"
-    METHOD_VERSION = "3"
+    METHOD_VERSION = "4"
     SCHEMA_VERSION = "1"
 
     def __init__(
@@ -314,20 +315,14 @@ def _caption_text(
         if timing_index is None:
             continue
         cue_lines = lines[timing_index + 1:]
-        raw_cue = " ".join(
-            unescape(line).strip()
-            for line in cue_lines
-            if line.strip()
-        ).strip()
-        inline_timestamp = _INLINE_TIMESTAMP.search(raw_cue)
-        rollup_prefix_word_count = None
-        if inline_timestamp is not None:
-            rollup_prefix_word_count = len(
-                _CUE_TAG.sub(
-                    "", raw_cue[:inline_timestamp.start()]
-                ).split()
-            )
-        cue = _CUE_TAG.sub("", raw_cue).strip()
+        (
+            cue,
+            rollup_prefix_word_count,
+            removed_internal_overlap_word_count,
+        ) = _normalized_caption_cue(
+            cue_lines,
+            transcript_format=transcript_format,
+        )
         if cue:
             if timing_match is None:
                 raise RuntimeError("Caption timing match was not retained.")
@@ -336,11 +331,17 @@ def _caption_text(
                 end_ms=_timestamp_ms(timing_match.group(2)),
                 text=cue,
                 rollup_prefix_word_count=rollup_prefix_word_count,
+                removed_internal_overlap_word_count=(
+                    removed_internal_overlap_word_count
+                ),
             ))
     words: list[str] = []
     removed_overlap_word_count = 0
     previous: _CaptionCue | None = None
     for cue in cues:
+        removed_overlap_word_count += (
+            cue.removed_internal_overlap_word_count
+        )
         cue_words = cue.text.split()
         overlap = 0
         if previous is not None and _may_roll_up(previous, cue):
@@ -367,6 +368,74 @@ def _may_roll_up(previous: _CaptionCue, incoming: _CaptionCue) -> bool:
         and incoming.start_ms - previous.end_ms
         <= _ROLLING_BOUNDARY_TOLERANCE_MS
     )
+
+
+def _normalized_caption_cue(
+        cue_lines: Sequence[str],
+        *,
+        transcript_format: TranscriptFormat,
+) -> tuple[str, int | None, int]:
+    decoded_lines = [
+        unescape(line).strip()
+        for line in cue_lines
+        if line.strip()
+    ]
+    raw_cue = " ".join(decoded_lines).strip()
+    if transcript_format is not TranscriptFormat.WEBVTT:
+        return _CUE_TAG.sub("", raw_cue).strip(), None, 0
+    inline_timestamp = _INLINE_TIMESTAMP.search(raw_cue)
+    if inline_timestamp is None:
+        return _CUE_TAG.sub("", raw_cue).strip(), None, 0
+
+    prefix_fragments: list[list[str]] = []
+    timed_fragments: list[str] = []
+    timestamp_seen = False
+    for line in decoded_lines:
+        if timestamp_seen:
+            timed_fragments.append(line)
+            continue
+        timestamp = _INLINE_TIMESTAMP.search(line)
+        if timestamp is None:
+            prefix_fragments.append(_CUE_TAG.sub("", line).split())
+            continue
+        prefix_fragments.append(
+            _CUE_TAG.sub("", line[:timestamp.start()]).split()
+        )
+        timed_fragments.append(line[timestamp.start():])
+        timestamp_seen = True
+
+    prefix_words, removed_internal_overlap_word_count = (
+        _collapse_exact_line_rollup(prefix_fragments)
+    )
+    timed_words = _CUE_TAG.sub(
+        "", " ".join(timed_fragments)
+    ).split()
+    cue_words = [*prefix_words, *timed_words]
+    return (
+        " ".join(cue_words),
+        len(prefix_words),
+        removed_internal_overlap_word_count,
+    )
+
+
+def _collapse_exact_line_rollup(
+        fragments: Sequence[Sequence[str]],
+) -> tuple[list[str], int]:
+    words: list[str] = []
+    removed_overlap_word_count = 0
+    for fragment in fragments:
+        incoming = list(fragment)
+        if not incoming:
+            continue
+        overlap = _exact_word_overlap(words, incoming)
+        if (
+                overlap < _MIN_PARTIAL_OVERLAP_WORDS
+                and overlap != len(incoming)
+        ):
+            overlap = 0
+        words.extend(incoming[overlap:])
+        removed_overlap_word_count += overlap
+    return words, removed_overlap_word_count
 
 
 def _timestamp_ms(value: str) -> int:

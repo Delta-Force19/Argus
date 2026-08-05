@@ -756,6 +756,11 @@ only exact word overlap supported by cue timing. Overlapping cues may carry an
 exact repeated prefix. Boundary-touching WebVTT cues may do the same only when
 an inline word timestamp identifies the technical roll-up prefix; text after
 that timestamp remains new speech even when its words repeat earlier speech.
+A YouTube rolling cue may serialize its current display line twice: once as a
+plain visual line and again immediately before the first inline word timestamp.
+Normalization collapses exact word overlap between those pre-timestamp line
+states before comparing the cue with its predecessor. Untimed visual lines are
+not deduplicated, so ordinary repeated subtitle text remains representable.
 A bounded 50-millisecond tolerance covers provider boundary quantization but
 does not turn materially separated cues into deduplication candidates. The
 payload records the cue count and number of removed overlap words. The

@@ -158,6 +158,9 @@ exact word overlap is removed when adjacent cues overlap in time. A WebVTT cue
 that touches the previous boundary within 50 milliseconds is eligible only
 when inline word timing marks its repeated roll-up prefix; only that prefix can
 be removed, while newly timed words remain intact. The normalization metadata
+also covers exact duplicate pre-timestamp display-line states inside a YouTube
+rolling cue. Lines without inline timing are preserved even when equal. This
+keeps transport duplication separate from genuine repeated speech. Metadata
 records both cue and removal counts. Publisher captions, human-created captions
 and automatically generated captions remain distinguishable; Argus does not treat
 their reliability as equal or silently relabel one kind as another.

@@ -87,7 +87,7 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["text"], "First story. Second story."
         )
-        self.assertEqual(artifact.method_version, "3")
+        self.assertEqual(artifact.method_version, "4")
         self.assertEqual(
             artifact.payload["normalization"],
             {
@@ -176,6 +176,50 @@ class TranscriptIngestionServiceTests(unittest.TestCase):
         self.assertEqual(
             artifact.payload["normalization"]["removed_overlap_word_count"],
             6,
+        )
+
+    def test_collapses_youtube_duplicate_display_line_inside_cue(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:02.000\n"
+            b"At least 25 people were killed by\n"
+            b"At least 25 people were killed by"
+            b"<00:00:01.500><c> Israeli air strikes and gunshots</c>\n\n"
+            b"00:00:02.010 --> 00:00:04.000\n"
+            b"Israeli air strikes and gunshots\n"
+            b"Israeli air strikes and gunshots"
+            b"<00:00:02.400><c> overnight.</c>\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"],
+            "At least 25 people were killed by Israeli air strikes and "
+            "gunshots overnight.",
+        )
+        self.assertEqual(
+            artifact.payload["normalization"]["removed_overlap_word_count"],
+            17,
+        )
+
+    def test_preserves_untimed_repeated_visual_lines(self) -> None:
+        content = (
+            b"WEBVTT\n\n"
+            b"00:00:00.000 --> 00:00:02.000\n"
+            b"Never again.\nNever again.\n"
+        )
+
+        result = self._ingest(content)
+
+        artifact = self.session.get(
+            DerivedArtifact, result.transcript_artifact_id
+        )
+        self.assertEqual(
+            artifact.payload["text"], "Never again. Never again."
         )
 
     def test_preserves_new_timestamped_repetition_at_touching_boundary(self) -> None:
