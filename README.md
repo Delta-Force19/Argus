@@ -99,6 +99,7 @@ python main.py extract-event-observations --document-version-id 34
 python main.py profile-event-fragments --document-version-id 34
 python main.py compare-event-fragments --document-version-id 34 --help
 python main.py propose-event-fragment-clusters --document-version-id 34 --help
+python main.py review-event-fragment-clusters --document-version-id 34 --cluster-proposal-artifact-id 915 --help
 ```
 
 Use `python main.py --help` as the authoritative command inventory; analytical

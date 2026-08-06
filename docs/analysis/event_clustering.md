@@ -173,6 +173,28 @@ read-only. `--persist` stores an immutable
 `EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact bound to the exact parent artifact
 identifier and content hash. No `Event`, cluster row or assignment is created.
 
+## Implemented cluster review
+
+`review-event-fragment-clusters` consumes one exact immutable
+`EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact and records a complete manual
+review snapshot. Every proposal is explicitly represented as `accepted`,
+`rejected` or `pending`. An ambiguous component may instead be marked
+`preserved_ambiguity`, distinguishing a deliberate abstention from a review
+that has not happened yet.
+
+A component becomes `resolved` only when exactly one proposal is accepted and
+every competing proposal is rejected. Accepting overlapping proposals is
+invalid. Rejecting every proposal yields `rejected`; incomplete decisions stay
+`pending`; candidate-free components remain `isolated`. Preserving ambiguity
+cannot be combined with accepting or rejecting a proposal inside that
+component.
+
+Optional persistence creates an immutable `EVENT_FRAGMENT_CLUSTER_REVIEW`
+artifact bound to the proposal artifact identifier and content hash. The
+artifact records the reviewer and reason, but remains a human decision rather
+than proof of event identity. It creates no `Event`, cluster row or fragment
+assignment.
+
 ## Event-content readiness
 
 Event analysis must distinguish source content from page metadata. Text

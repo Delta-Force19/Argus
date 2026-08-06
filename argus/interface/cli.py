@@ -127,6 +127,13 @@ from argus.event_fragment_cluster_proposals import ClusterComponentStatus
 from argus.services.event_fragment_cluster_proposal_service import (
     propose_event_fragment_clusters,
 )
+from argus.event_fragment_cluster_reviews import (
+    ComponentReviewStatus,
+    ProposalReviewStatus,
+)
+from argus.services.event_fragment_cluster_review_service import (
+    review_event_fragment_clusters,
+)
 from argus.services.transcript_ingestion_service import ingest_transcript_file
 from argus.services.transcript_timeline_service import (
     inspect_transcript_timeline,
@@ -2312,6 +2319,100 @@ def propose_event_fragment_clusters_command(
                 )
     for limitation in report.quality_limitations:
         typer.echo(f"limitation={limitation!r}")
+
+
+@app.command("review-event-fragment-clusters")
+def review_event_fragment_clusters_command(
+        document_version_id: int = typer.Option(
+            ..., "--document-version-id", min=1,
+            help="Exact document version whose proposals are reviewed.",
+        ),
+        cluster_proposal_artifact_id: int = typer.Option(
+            ..., "--cluster-proposal-artifact-id", min=1,
+            help="Exact immutable cluster-proposal artifact.",
+        ),
+        accept_proposal_ids: str = typer.Option(
+            "", "--accept-proposal-ids",
+            help="Comma-separated proposal ids to accept.",
+        ),
+        reject_proposal_ids: str = typer.Option(
+            "", "--reject-proposal-ids",
+            help="Comma-separated proposal ids to reject.",
+        ),
+        preserve_component_fragment_ids: str = typer.Option(
+            "", "--preserve-component-fragment-ids",
+            help=(
+                "Semicolon-separated components, each expressed as comma-separated "
+                "fragment ids, whose ambiguity is explicitly preserved."
+            ),
+        ),
+        reviewer: str = typer.Option(..., "--reviewer"),
+        reason: str = typer.Option(..., "--reason"),
+        persist: bool = typer.Option(
+            False, "--persist", help="Persist the immutable review snapshot."
+        ),
+) -> None:
+    """Record explicit review without creating an Event or assignment."""
+
+    try:
+        report = review_event_fragment_clusters(
+            document_version_id=document_version_id,
+            cluster_proposal_artifact_id=cluster_proposal_artifact_id,
+            accepted_proposal_ids=_parse_id_list(accept_proposal_ids),
+            rejected_proposal_ids=_parse_id_list(reject_proposal_ids),
+            preserved_component_fragment_ids=tuple(
+                _parse_id_list(value)
+                for value in preserve_component_fragment_ids.split(";")
+                if value.strip()
+            ),
+            reviewer=reviewer,
+            reason=reason,
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    proposal_counts = " ".join(
+        f"{status.value}={report.proposal_status_count(status)}"
+        for status in ProposalReviewStatus
+    )
+    component_counts = " ".join(
+        f"{status.value}={report.component_status_count(status)}"
+        for status in ComponentReviewStatus
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        f"cluster_proposal_artifact_id={report.cluster_proposal_artifact_id} "
+        "cluster_review_artifact_id="
+        f"{report.cluster_review_artifact_id if report.cluster_review_artifact_id is not None else 'none'} "
+        f"proposals={len(report.proposals)} {proposal_counts} "
+        f"components={len(report.components)} {component_counts} "
+        f"persisted={str(report.persisted).lower()} "
+        "events_created=0 event_assignments=0"
+    )
+    for proposal in report.proposals:
+        typer.echo(
+            f"proposal_id={proposal.proposal_id} "
+            f"event_fragment_ids={','.join(map(str, proposal.event_fragment_ids))} "
+            f"review_status={proposal.status.value!r}"
+        )
+    for component in report.components:
+        typer.echo(
+            "component_event_fragment_ids="
+            f"{','.join(map(str, component.event_fragment_ids))} "
+            f"review_status={component.status.value!r} "
+            "accepted_proposal_id="
+            f"{component.accepted_proposal_id if component.accepted_proposal_id is not None else 'none'} "
+            f"rationale={component.rationale!r}"
+        )
+
+
+def _parse_id_list(value: str) -> tuple[int, ...]:
+    if not value.strip():
+        return ()
+    try:
+        return tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError("Identifier lists must contain comma-separated integers.") from error
 
 
 @app.command()

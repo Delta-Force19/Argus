@@ -779,6 +779,15 @@ Optional persistence creates an immutable
 `EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact bound to the pair artifact and
 hash. It creates no `Event`, persisted cluster or assignment.
 
+`review-event-fragment-clusters` consumes one exact cluster-proposal artifact
+and validates a complete manual review snapshot. Proposal states are accepted,
+rejected or pending; ambiguous components can be explicitly preserved rather
+than silently left undecided. Overlapping proposals cannot both be accepted,
+and a component is resolved only when one proposal is accepted and every
+alternative rejected. Optional persistence creates an immutable
+`EVENT_FRAGMENT_CLUSTER_REVIEW` artifact bound to the proposal artifact and
+hash. It records decision provenance but creates no event or assignment.
+
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from
 event comparison and fragment persistence until a source-anchored transcript

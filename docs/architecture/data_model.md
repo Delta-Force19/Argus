@@ -294,6 +294,20 @@ so the artifact is not a partition and never applies transitive event
 identity. The parent identifier and content hash preserve reproducibility. No
 `Event`, cluster relation or event-fragment assignment is created.
 
+### Event Fragment Cluster Review Artifact
+
+An `EVENT_FRAGMENT_CLUSTER_REVIEW` derived artifact is an immutable manual
+review snapshot over one exact `EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact.
+It stores the parent identifier and content hash, reviewer, reason, every
+proposal disposition and the effective component disposition. Accepted,
+rejected and pending proposal states remain distinct from an explicit
+`preserved_ambiguity` component decision.
+
+The artifact rejects overlapping accepted proposals and reports a component
+as resolved only after one proposal is accepted and all alternatives are
+rejected. It is decision provenance, not an `Event`, cluster membership or
+fragment assignment.
+
 ### Entity Mention
 
 An `EntityMention` is a model observation that a text span appears to refer to
