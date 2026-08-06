@@ -150,6 +150,29 @@ immutable `EVENT_FRAGMENT_PAIR_CANDIDATES` artifact bound to the parent
 artifact identifier and content hash. `--show-matches` exposes the
 source-level evidence behind each status.
 
+## Implemented cluster proposals
+
+`propose-event-fragment-clusters` consumes one exact immutable
+`EVENT_FRAGMENT_PAIR_CANDIDATES` artifact and treats only `candidate` pairs as
+edges in a review graph. A proposal is a maximal clique of at least two
+fragments: every pair inside it must independently have candidate status, and
+no additional fragment can be added without breaking that all-pairs rule.
+
+This deliberately differs from connected-component clustering. If `1↔3` and
+`2↔3` are candidates while `1↔2` is weak, the method emits the overlapping
+alternatives `{1,3}` and `{2,3}` rather than transitively merging `{1,2,3}`.
+The containing graph component is marked `ambiguous`, and the `1↔2` decision
+is preserved as an explicit blocking pair. Complete candidate components are
+`coherent`; fragments with no candidate edge are `isolated`.
+
+The labels and proposals organize review. They are not a partition,
+probability, same-event assertion or negative event-identity decision. Weak
+and insufficient pairs prevent automatic clique expansion under this method
+but do not prove that the fragments describe different events. Preview is
+read-only. `--persist` stores an immutable
+`EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact bound to the exact parent artifact
+identifier and content hash. No `Event`, cluster row or assignment is created.
+
 ## Event-content readiness
 
 Event analysis must distinguish source content from page metadata. Text

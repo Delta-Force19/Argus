@@ -123,6 +123,10 @@ from argus.event_fragment_pair_candidates import FragmentPairStatus
 from argus.services.event_fragment_pair_candidate_service import (
     compare_event_fragment_profiles,
 )
+from argus.event_fragment_cluster_proposals import ClusterComponentStatus
+from argus.services.event_fragment_cluster_proposal_service import (
+    propose_event_fragment_clusters,
+)
 from argus.services.transcript_ingestion_service import ingest_transcript_file
 from argus.services.transcript_timeline_service import (
     inspect_transcript_timeline,
@@ -2215,6 +2219,96 @@ def compare_event_fragments_command(
                     f"{','.join(map(str, match.right_observation_ids))} "
                     f"evidence_points={match.evidence_points} "
                     f"rationale={match.rationale!r}"
+                )
+    for limitation in report.quality_limitations:
+        typer.echo(f"limitation={limitation!r}")
+
+
+@app.command("propose-event-fragment-clusters")
+def propose_event_fragment_clusters_command(
+        document_version_id: int = typer.Option(
+            ...,
+            "--document-version-id",
+            min=1,
+            help="Exact document version whose pair audit is organized.",
+        ),
+        fragment_pair_candidate_artifact_id: int | None = typer.Option(
+            None,
+            "--fragment-pair-candidate-artifact-id",
+            min=1,
+            help="Exact pair-candidate artifact when the version has several.",
+        ),
+        persist: bool = typer.Option(
+            False,
+            "--persist",
+            help="Persist review-only cluster proposals as a derived artifact.",
+        ),
+        show_blockers: bool = typer.Option(
+            False,
+            "--show-blockers",
+            help="Print weak or insufficient pairs that block clique expansion.",
+        ),
+) -> None:
+    """Propose all-pairs candidate cliques without creating events."""
+
+    try:
+        report = propose_event_fragment_clusters(
+            document_version_id=document_version_id,
+            fragment_pair_candidate_artifact_id=(
+                fragment_pair_candidate_artifact_id
+            ),
+            persist=persist,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    counts = " ".join(
+        f"{status.value}={report.component_status_count(status)}"
+        for status in ClusterComponentStatus
+    )
+    typer.echo(
+        f"document_version_id={report.document_version_id} "
+        "fragment_pair_candidate_artifact_id="
+        f"{report.fragment_pair_candidate_artifact_id} "
+        "cluster_proposal_artifact_id="
+        f"{report.cluster_proposal_artifact_id if report.cluster_proposal_artifact_id is not None else 'none'} "
+        f"proposals={len(report.proposals)} components={len(report.components)} "
+        f"{counts} persisted={str(report.persisted).lower()} "
+        f"method={report.method!r} method_version={report.method_version!r} "
+        "events_created=0 event_assignments=0"
+    )
+    for proposal in report.proposals:
+        dimensions = ",".join(
+            item.value for item in proposal.evidence_dimensions
+        ) or "none"
+        typer.echo(
+            f"proposal_id={proposal.proposal_id} "
+            "event_fragment_ids="
+            f"{','.join(map(str, proposal.event_fragment_ids))} "
+            f"supporting_pairs={len(proposal.supporting_pairs)} "
+            f"dimensions={dimensions!r} "
+            f"evidence_points={proposal.evidence_points} "
+            f"rationale={proposal.rationale!r} event_assignment=none"
+        )
+    for component in report.components:
+        typer.echo(
+            "component_event_fragment_ids="
+            f"{','.join(map(str, component.event_fragment_ids))} "
+            f"status={component.status.value!r} "
+            "proposal_ids="
+            f"{','.join(map(str, component.proposal_ids)) or 'none'} "
+            f"candidate_pairs={component.candidate_pair_count} "
+            f"blocking_pairs={len(component.blocking_pairs)} "
+            f"rationale={component.rationale!r}"
+        )
+        if show_blockers:
+            for blocker in component.blocking_pairs:
+                typer.echo(
+                    "component_event_fragment_ids="
+                    f"{','.join(map(str, component.event_fragment_ids))} "
+                    f"left_event_fragment_id={blocker.left_event_fragment_id} "
+                    f"right_event_fragment_id={blocker.right_event_fragment_id} "
+                    f"status={blocker.status.value!r} "
+                    f"rationale={blocker.rationale!r}"
                 )
     for limitation in report.quality_limitations:
         typer.echo(f"limitation={limitation!r}")

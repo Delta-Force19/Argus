@@ -278,6 +278,22 @@ overlap under one versioned rule. They are not probabilities, negative
 evidence, event identities, cluster membership or assignments. No relational
 event row is created at this stage.
 
+### Event Fragment Cluster Proposal Artifact
+
+An `EVENT_FRAGMENT_CLUSTER_PROPOSALS` derived artifact organizes one exact
+`EVENT_FRAGMENT_PAIR_CANDIDATES` artifact into review alternatives. Each
+proposal is a maximal clique whose every internal pair has candidate status.
+It stores fragment identifiers, supporting pair identifiers, combined
+evidence dimensions, heuristic evidence points and a rationale.
+
+The artifact also stores every candidate-edge connected component. Complete
+components are `coherent`; incomplete components are `ambiguous` and preserve
+their weak or insufficient internal blocking pairs; fragments without a
+candidate edge are `isolated`. Overlapping clique proposals remain separate,
+so the artifact is not a partition and never applies transitive event
+identity. The parent identifier and content hash preserve reproducibility. No
+`Event`, cluster relation or event-fragment assignment is created.
+
 ### Entity Mention
 
 An `EntityMention` is a model observation that a text span appears to refer to

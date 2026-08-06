@@ -770,6 +770,15 @@ review priorities rather than event-identity decisions. Optional persistence
 creates an immutable `EVENT_FRAGMENT_PAIR_CANDIDATES` artifact bound to the
 profile artifact and hash; it creates no `Event`, cluster or assignment.
 
+`propose-event-fragment-clusters` consumes one exact pair-candidate artifact.
+Candidate pairs become graph edges, but connected components are not treated
+as event identities. The deterministic method emits maximal all-candidate
+cliques, preserves overlapping alternatives, records weak or insufficient
+internal pairs as blockers, and reports candidate-free fragments as isolated.
+Optional persistence creates an immutable
+`EVENT_FRAGMENT_CLUSTER_PROPOSALS` artifact bound to the pair artifact and
+hash. It creates no `Event`, persisted cluster or assignment.
+
 The same boundary checks event-content readiness. HTML extracted from a video
 page remains a valid reproducible record of that page, but it is blocked from
 event comparison and fragment persistence until a source-anchored transcript
